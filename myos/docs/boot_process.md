@@ -103,3 +103,32 @@ kernel). It is verified by dedicated destructive builds:
 Both run headless via `tools/verify_qemu.py` and confirm the trap frame carries
 a correct kernel-mode RIP/CS/RFLAGS and an interrupted RSP inside the kernel
 stack (SS = 0x10). Neither test is present in a normal `make all` / `make run`.
+
+## Interrupts + scheduler (Prompt 3)
+
+After the Prompt 2.5 baseline, `kernel_main` (now `MyOS Kernel 0.0.3`) brings
+up the interrupt and scheduling foundation:
+
+```
+pic_disable()                  remap 8259 to 0x20/0x28 + mask all lines
+madt_init(rsdp)                RSDP -> XSDT/RSDT -> MADT (CPUs, IOAPIC, IRQ0 override)
+lapic_discover()               MSR 0x1B + MADT; map LAPIC 2MiB page CD/WT
+lapic_enable()                 spurious vector 0xF0 | enable, TPR=0
+irq_init()                     stubs for 0x20-0x2F, 0x30, 0xF0 -> IDT gates
+pit_init_periodic(0)           free-running (calibration reference)
+kernel_timer_init()            LAPIC timer @100Hz (PIT-calibrated) -> tick source
+thread_system_init()           thread IDs + trampoline contract
+scheduler_init()               boot placeholder + idle thread + ready queue
+scheduler_tests_start()        threads A/B/C + checker created
+scheduler_start()              abandon boot context; first context switch
+```
+
+From `scheduler_start()` on, all execution is in kernel threads. The timer IRQ
+(vector 0x30) wakes sleepers and enforces the 50 ms quantum; the actual
+preemption switch happens after EOI on the IRQ exit path. The scheduler
+self-tests print `[TEST]`/`[PASS]` lines and `[OK] Scheduler tests passed`,
+after which the system idles (checker sleeps, idle thread `sti; hlt`s).
+
+Interrupts are first enabled not in `kernel_main` but inside the first
+scheduled thread (`thread_trampoline` does `sti`), so no tick can arrive
+before the scheduler is fully live.

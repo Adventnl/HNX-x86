@@ -1,73 +1,66 @@
-# MyOS Prompt 2 Specification — Kernel CPU and Memory Foundation
+# MyOS Prompt 3 Specification — Interrupt Controller and Scheduler Foundation
 
-This document extends the completed Stage 1–16 boot pipeline.
+Prompt 1, Prompt 2, and Prompt 2.5 are complete.
 
-Stage 1–16 is already complete:
+Current verified state:
 
 ```text
-UEFI firmware
-    ↓
-custom BOOTX64.EFI
-    ↓
-load /boot/kernel.elf
-    ↓
-parse ELF64
-    ↓
-load kernel segments
-    ↓
-collect boot_info
-    ↓
-ExitBootServices
-    ↓
-jump to kernel
-    ↓
-kernel prints through framebuffer
+UEFI → custom BOOTX64.EFI → ELF64 kernel → ExitBootServices → kernel framebuffer + serial log
 ```
 
-Prompt 2 starts from that working state.
-
-The goal of Prompt 2 is to turn the tiny framebuffer-printing kernel into a real early kernel foundation with:
+Already implemented and verified:
 
 ```text
-CPU descriptor setup
+custom UEFI bootloader
+ELF64 kernel loading
+boot_info handoff
+framebuffer console
+COM1 serial logging
 GDT
 TSS
 IDT
 exception handlers
-page fault handler
-serial logging
+page fault diagnostics
+panic/halt hardening
 physical memory manager
-kernel page table ownership
-virtual memory helpers
+bitmap page allocator
+kernel page tables
+custom CR3 loaded and validated
 kernel heap
-early test framework
+early tests
+headless QEMU verification targets
 ```
 
-Prompt 2 must not implement:
+Prompt 3 goal:
 
 ```text
-timer preemption
-APIC timer
-scheduler
-kernel threads
+Turn the early single-flow kernel into an interrupt-driven kernel with timer interrupts, IRQ dispatch, kernel threads, context switching, sleep/wakeup, and a preemptive round-robin scheduler.
+```
+
+Prompt 3 does **not** implement:
+
+```text
 user mode
 syscalls
 processes
+ELF user programs
 VFS
 initramfs
 filesystems
-PCI
+PCI storage drivers
 USB
 networking
 GUI
-SMP
+SMP/multicore scheduling
+permissions
+signals
 ```
 
 Those are later prompts.
 
-## Non-Negotiable Architecture Rules
+## Non-Negotiable Rules
 
-Do not redesign the completed boot pipeline.
+Do not redesign existing architecture.
 
 Keep:
 
@@ -77,9 +70,13 @@ UEFI
 custom BOOTX64.EFI
 custom UEFI headers
 ELF64 kernel
-boot_info pointer passed to kernel
-kernel framebuffer console
-QEMU + OVMF test path
+boot_info handoff
+ExitBootServices
+framebuffer console
+serial logger
+custom GDT/TSS/IDT
+custom PMM/VMM/heap
+QEMU + OVMF validation
 ```
 
 Do not add:
@@ -92,528 +89,188 @@ EDK2
 Linux code
 BSD code
 Windows code
-existing kernel code
+external kernel code
+external scheduler code
 external libc
-host OS runtime dependencies
 ```
 
-The kernel remains freestanding.
+## Prompt 3 Stage Range
 
-## Prompt 2 Stage Range
-
-Prompt 2 covers these build stages:
+Prompt 3 covers:
 
 ```text
-17. Kernel architecture folder expansion
-18. CPU type and register definitions
-19. Early serial COM1 logging
-20. Kernel logging router
-21. GDT setup
-22. TSS setup
-23. IDT setup
-24. Exception assembly stubs
-25. C exception dispatcher
-26. Page fault handler
-27. CPU halt and panic hardening
-28. Physical memory map parser
-29. Physical page allocator
-30. Kernel virtual memory constants
-31. Kernel page table builder
-32. Kernel heap allocator
-33. Early kernel test framework
-34. Documentation and validation
+35. Interrupt subsystem structure
+36. Legacy PIC disable hardening
+37. ACPI MADT parser
+38. Local APIC discovery
+39. Local APIC enable
+40. Local APIC EOI support
+41. IRQ dispatcher
+42. IRQ assembly stubs
+43. PIT timer driver
+44. Local APIC timer driver
+45. Timer abstraction
+46. Kernel tick counter
+47. Kernel thread structure
+48. Kernel context switch assembly
+49. Ready queue
+50. Round-robin scheduler
+51. Idle thread
+52. Sleep/wakeup system
+53. Timer preemption
+54. Scheduler tests and verification
 ```
 
-The final successful Prompt 2 boot should show both framebuffer and serial logs:
+Final expected boot log:
 
 ```text
-MyOS Kernel 0.0.2
-[OK] boot info valid
-[OK] serial online
+MyOS Kernel 0.0.3
+[OK] Kernel entered
+[OK] Boot info magic valid
+[OK] Framebuffer console online
+[OK] Serial online
 [OK] GDT loaded
 [OK] TSS loaded
 [OK] IDT loaded
-[OK] exceptions online
-[OK] physical memory manager online
-[OK] page allocator online
-[OK] kernel page tables online
-[OK] page fault handler online
-[OK] kernel heap online
-[OK] early kernel tests passed
+[OK] Exceptions online
+[OK] Physical memory manager online
+[OK] Kernel CR3 loaded
+[OK] Kernel heap online
+[OK] Prompt 2.5 baseline verification passed
+[OK] Legacy PIC disabled
+[OK] ACPI MADT parsed
+[OK] Local APIC discovered
+[OK] Local APIC enabled
+[OK] IRQ dispatcher online
+[OK] PIT timer online
+[OK] Local APIC timer online
+[OK] Kernel tick online
+[OK] Context switch online
+[OK] Scheduler online
+[OK] Sleep/wakeup online
+[OK] Timer preemption online
+[OK] Scheduler tests passed
 ```
 
-## Required Updated Repository Layout
+## Required New Files
 
-Keep all existing Stage 1–16 files.
-
-Add these files:
+Add:
 
 ```text
-kernel/
-├── arch/
-│   └── x86_64/
-│       ├── cpu.c
-│       ├── cpu.h
-│       ├── gdt.c
-│       ├── gdt.h
-│       ├── gdt_load.S
-│       ├── tss.c
-│       ├── tss.h
-│       ├── idt.c
-│       ├── idt.h
-│       ├── isr.S
-│       ├── exceptions.c
-│       ├── exceptions.h
-│       ├── paging.c
-│       ├── paging.h
-│       ├── cr.S
-│       ├── halt.S
-│       ├── port_io.S
-│       └── serial.c
-│
-├── include/
-│   ├── log.h
-│   ├── panic.h
-│   ├── assert.h
-│   └── status.h
-│
-├── memory/
-│   ├── pmm.c
-│   ├── pmm.h
-│   ├── vmm.c
-│   ├── vmm.h
-│   ├── heap.c
-│   ├── heap.h
-│   └── memory_layout.h
-│
-├── tests/
-│   ├── early_tests.c
-│   └── early_tests.h
-│
-└── src/
-    ├── log.c
-    └── assert.c
+kernel/arch/x86_64/
+├── pic.c
+├── pic.h
+├── apic.c
+├── apic.h
+├── madt.c
+├── madt.h
+├── irq.c
+├── irq.h
+├── irq_stubs.S
+├── pit.c
+├── pit.h
+├── lapic_timer.c
+├── lapic_timer.h
+└── timer.c
+└── timer.h
+
+kernel/sched/
+├── thread.c
+├── thread.h
+├── context_switch.S
+├── scheduler.c
+├── scheduler.h
+├── sleep.c
+├── sleep.h
+├── idle.c
+└── idle.h
+
+kernel/tests/
+├── scheduler_tests.c
+└── scheduler_tests.h
 ```
 
-Existing files may be updated:
+Modify as needed:
 
 ```text
-kernel/src/kernel.c
-kernel/src/panic.c
-kernel/src/framebuffer_console.c
-kernel/include/types.h
-kernel/arch/x86_64/linker.ld
 Makefile
-tools/run_qemu.py
+kernel/src/kernel.c
+kernel/src/log.c
+kernel/src/panic.c
+kernel/arch/x86_64/idt.c
+kernel/arch/x86_64/idt.h
+kernel/arch/x86_64/exceptions.c
+kernel/arch/x86_64/paging.c
+kernel/include/types.h
+kernel/include/status.h
+kernel/tests/early_tests.c
+tools/verify_qemu.py
 docs/checkpoints.md
 docs/boot_process.md
 docs/build.md
+README.md
 ```
 
 ## Build System Requirements
 
-The existing Makefile must be extended to compile:
+Extend the Makefile to compile:
 
 ```text
-kernel/arch/x86_64/*.c
-kernel/arch/x86_64/*.S
-kernel/memory/*.c
-kernel/tests/*.c
-kernel/src/*.c
+kernel/sched/*.c
+kernel/sched/*.S
+new kernel/arch/x86_64/*.c
+new kernel/arch/x86_64/*.S
 ```
 
-Do not hard-code every new file manually if a clean wildcard approach is already used.
+Add verification targets:
 
-Keep current kernel flags:
-
-```text
---target=x86_64-unknown-none-elf
--ffreestanding
--fno-stack-protector
--fno-builtin
--fno-pic
--fno-pie
--mno-red-zone
--mcmodel=kernel
--nostdlib
--Wall
--Wextra
+```bash
+make verify-interrupts
+make verify-timer
+make verify-scheduler
+make verify-preemption
+make verify-prompt3
 ```
 
-Add only necessary warning suppressions if unavoidable.
+Existing verification targets must continue to pass:
 
-Do not hide real warnings.
-
-`make all`, `make image`, and `make run` must still work.
-
-## Stage 17 — Kernel Architecture Folder Expansion
-
-Create a clean architecture layer for x86-64.
-
-Architecture-specific code goes in:
-
-```text
-kernel/arch/x86_64/
+```bash
+make verify-boot
+make verify-exception
+make verify-pagefault
+make verify-qemu-matrix
 ```
 
-Architecture-independent memory code goes in:
+Prompt 3 is not complete if Prompt 2.5 verification regresses.
 
-```text
-kernel/memory/
-```
+## Stage 35 — Interrupt Subsystem Structure
 
-Architecture-independent logging, panic, assertions, and tests go in:
+Create an IRQ subsystem separate from CPU exceptions.
 
-```text
-kernel/src/
-kernel/include/
-kernel/tests/
-```
+Exceptions are vectors 0–31.
 
-Do not put everything into `kernel.c`.
-
-Success:
-
-```text
-Code is separated into clear modules.
-Kernel still boots after file split.
-```
-
-## Stage 18 — CPU Type and Register Definitions
-
-Create:
-
-```text
-kernel/arch/x86_64/cpu.h
-kernel/arch/x86_64/cpu.c
-kernel/arch/x86_64/cr.S
-```
-
-Required low-level helpers:
+Hardware IRQs should use vectors starting at:
 
 ```c
-uint64_t x86_read_cr0(void);
-uint64_t x86_read_cr2(void);
-uint64_t x86_read_cr3(void);
-uint64_t x86_read_cr4(void);
-
-void x86_write_cr0(uint64_t value);
-void x86_write_cr3(uint64_t value);
-void x86_write_cr4(uint64_t value);
-
-uint64_t x86_read_rflags(void);
-
-void x86_lgdt(void *gdtr);
-void x86_lidt(void *idtr);
-void x86_ltr(uint16_t selector);
-
-void x86_halt(void);
-void x86_halt_forever(void);
+#define IRQ_BASE_VECTOR 0x20
 ```
 
-Required CPU info:
-
-```c
-struct x86_cpu_info {
-    uint64_t cr0;
-    uint64_t cr2;
-    uint64_t cr3;
-    uint64_t cr4;
-    uint64_t rflags;
-};
-```
-
-Add a function:
-
-```c
-void x86_cpu_init_early(void);
-```
-
-For Prompt 2, this function may only collect/print basic state.
-
-Success output:
+Recommended vectors:
 
 ```text
-[OK] CPU state readable
+0x20 timer
+0x21 keyboard later
+0x22 cascade/reserved
+0x30 local APIC timer if separated
+0xF0 spurious APIC vector
 ```
-
-## Stage 19 — Early Serial COM1 Logging
-
-Create:
-
-```text
-kernel/arch/x86_64/serial.c
-kernel/arch/x86_64/port_io.S
-```
-
-Implement port I/O helpers:
-
-```c
-uint8_t x86_inb(uint16_t port);
-void x86_outb(uint16_t port, uint8_t value);
-```
-
-Implement COM1 serial:
-
-```c
-void serial_init(void);
-int serial_is_ready(void);
-void serial_write_char(char c);
-void serial_write_string(const char *text);
-void serial_write_hex64(uint64_t value);
-```
-
-COM1 base:
-
-```text
-0x3F8
-```
-
-Serial init must configure:
-
-```text
-disable interrupts
-enable DLAB
-baud divisor
-8 bits
-no parity
-one stop bit
-FIFO
-modem control
-```
-
-QEMU must expose serial through:
-
-```text
--serial stdio
-```
-
-or keep existing serial setup if already present.
-
-Success:
-
-```text
-Serial log appears in terminal while framebuffer log appears in QEMU display.
-```
-
-## Stage 20 — Kernel Logging Router
-
-Create:
-
-```text
-kernel/include/log.h
-kernel/src/log.c
-```
-
-The kernel logger must write to both:
-
-```text
-framebuffer console
-serial console
-```
-
-Required functions:
-
-```c
-void kernel_log_init(void);
-void kernel_log(const char *message);
-void kernel_log_line(const char *message);
-void kernel_log_ok(const char *message);
-void kernel_log_warn(const char *message);
-void kernel_log_error(const char *message);
-void kernel_log_hex64(const char *label, uint64_t value);
-```
-
-Rules:
-
-```text
-If framebuffer is not initialized yet, serial still works.
-If serial is not initialized yet, framebuffer still works.
-Logging must not crash if one output is missing.
-```
-
-Success output:
-
-```text
-[OK] serial online
-[OK] kernel logger online
-```
-
-## Stage 21 — GDT Setup
-
-Create:
-
-```text
-kernel/arch/x86_64/gdt.h
-kernel/arch/x86_64/gdt.c
-kernel/arch/x86_64/gdt_load.S
-```
-
-Required GDT entries:
-
-```text
-null descriptor
-kernel code segment
-kernel data segment
-user data segment
-user code segment
-TSS low
-TSS high
-```
-
-Selectors:
-
-```c
-#define GDT_KERNEL_CODE 0x08
-#define GDT_KERNEL_DATA 0x10
-#define GDT_USER_DATA   0x18
-#define GDT_USER_CODE   0x20
-#define GDT_TSS         0x28
-```
-
-For now, user segments are installed but not used until a later prompt.
-
-Required function:
-
-```c
-void gdt_init(void);
-```
-
-`gdt_init` must:
-
-```text
-build GDT
-load GDTR
-reload segment registers
-prepare for TSS loading
-```
-
-Success output:
-
-```text
-[OK] GDT loaded
-```
-
-## Stage 22 — TSS Setup
-
-Create:
-
-```text
-kernel/arch/x86_64/tss.h
-kernel/arch/x86_64/tss.c
-```
-
-Define x86-64 TSS structure.
-
-Required fields:
-
-```text
-rsp0
-ist1
-ist2
-iomap_base
-```
-
-Allocate static stacks:
-
-```text
-kernel privilege stack
-double fault IST stack
-page fault IST stack optional
-```
-
-Required function:
-
-```c
-void tss_init(void);
-```
-
-`tss_init` must:
-
-```text
-initialize TSS
-set rsp0
-set IST stack for double fault
-install TSS descriptor in GDT
-load TR using ltr
-```
-
-Success output:
-
-```text
-[OK] TSS loaded
-```
-
-## Stage 23 — IDT Setup
-
-Create:
-
-```text
-kernel/arch/x86_64/idt.h
-kernel/arch/x86_64/idt.c
-```
-
-The IDT must support 256 entries.
 
 Required types:
 
 ```c
-struct idt_entry;
-struct idt_pointer;
-```
+typedef void (*irq_handler_t)(uint8_t vector, void *context);
 
-Required functions:
-
-```c
-void idt_init(void);
-void idt_set_gate(
-    uint8_t vector,
-    void *handler,
-    uint16_t selector,
-    uint8_t flags
-);
-```
-
-Required gate flags:
-
-```text
-present
-interrupt gate
-kernel DPL
-```
-
-For now, install exception handlers for vectors:
-
-```text
-0–31
-```
-
-Success output:
-
-```text
-[OK] IDT loaded
-```
-
-## Stage 24 — Exception Assembly Stubs
-
-Create:
-
-```text
-kernel/arch/x86_64/isr.S
-```
-
-Implement stubs for CPU exceptions 0–31.
-
-They must save enough register state to a trap frame and call C dispatcher:
-
-```c
-void x86_exception_dispatch(struct x86_trap_frame *frame);
-```
-
-Required trap frame fields:
-
-```c
-struct x86_trap_frame {
+struct irq_context {
     uint64_t vector;
     uint64_t error_code;
 
@@ -642,617 +299,869 @@ struct x86_trap_frame {
 };
 ```
 
-For exceptions without hardware error code, push a fake error code of `0`.
+Required functions:
 
-For exceptions with hardware error code, preserve the real one.
-
-Hardware error-code exceptions include:
-
-```text
-8 double fault
-10 invalid TSS
-11 segment not present
-12 stack segment fault
-13 general protection fault
-14 page fault
-17 alignment check
-21 control protection
-29 VMM communication exception
-30 security exception
+```c
+void irq_init(void);
+void irq_register_handler(uint8_t vector, irq_handler_t handler, void *context);
+void irq_unregister_handler(uint8_t vector);
+void irq_dispatch(struct irq_context *context);
+void irq_enable(void);
+void irq_disable(void);
+uint64_t irq_save_flags_and_disable(void);
+void irq_restore_flags(uint64_t flags);
 ```
-
-If exact vector support is uncertain, implement at least:
-
-```text
-0 divide error
-3 breakpoint
-6 invalid opcode
-8 double fault
-13 general protection fault
-14 page fault
-```
-
-But prefer all 0–31.
 
 Success:
 
 ```text
-Deliberate invalid instruction or breakpoint enters C exception dispatcher instead of triple faulting.
+[OK] IRQ dispatcher online
 ```
 
-## Stage 25 — C Exception Dispatcher
+## Stage 36 — Legacy PIC Disable Hardening
 
 Create:
 
 ```text
-kernel/arch/x86_64/exceptions.h
-kernel/arch/x86_64/exceptions.c
+kernel/arch/x86_64/pic.c
+kernel/arch/x86_64/pic.h
 ```
 
 Required functions:
 
 ```c
-void exceptions_init(void);
-void x86_exception_dispatch(struct x86_trap_frame *frame);
-const char *x86_exception_name(uint64_t vector);
+void pic_remap(uint8_t master_offset, uint8_t slave_offset);
+void pic_mask_all(void);
+void pic_disable(void);
+void pic_send_eoi(uint8_t irq);
 ```
 
-Behavior:
+For APIC mode, the PIC must be masked and disabled.
+
+Required behavior:
 
 ```text
-print vector
-print exception name
-print error code
-print RIP
-print RSP
-print RFLAGS
-print CR2 for page fault
-panic/halt
+remap PIC away from CPU exception vectors
+mask all IRQ lines
+disable legacy PIC path
+do not rely on PIC for final timer preemption
 ```
 
-Prompt 2 does not need recoverable exceptions.
-
-All exceptions may panic.
-
-Success output for deliberate test:
+Success:
 
 ```text
-[PANIC] CPU exception
-vector: 6
-name: invalid opcode
-rip: 0x...
+[OK] Legacy PIC disabled
 ```
 
-Do not keep deliberate exception test enabled by default after validation.
+## Stage 37 — ACPI MADT Parser
 
-## Stage 26 — Page Fault Handler
-
-Page fault handling is part of the exception dispatcher.
-
-For vector 14, print:
+Create:
 
 ```text
-page fault address from CR2
-error code
-present bit
-write bit
-user bit
-reserved bit
-instruction-fetch bit if available
-RIP
+kernel/arch/x86_64/madt.c
+kernel/arch/x86_64/madt.h
+```
+
+Use `boot_info->rsdp_address`.
+
+Parse:
+
+```text
+RSDP
+XSDT preferred
+RSDT fallback
+MADT / APIC table
+```
+
+Required MADT records:
+
+```text
+type 0: Processor Local APIC
+type 1: I/O APIC
+type 2: Interrupt Source Override
+type 4: Local APIC NMI
+type 5: Local APIC Address Override
+```
+
+Required output structure:
+
+```c
+struct madt_info {
+    uint64_t local_apic_physical_base;
+    uint32_t local_apic_count;
+
+    uint64_t io_apic_physical_base;
+    uint32_t io_apic_id;
+    uint32_t global_system_interrupt_base;
+
+    uint8_t has_legacy_irq0_override;
+    uint32_t irq0_gsi;
+    uint16_t irq0_flags;
+};
+```
+
+Required functions:
+
+```c
+int madt_init(uint64_t rsdp_address);
+const struct madt_info *madt_get_info(void);
+void madt_dump_info(void);
+```
+
+Success:
+
+```text
+[OK] ACPI MADT parsed
+```
+
+If MADT is missing, panic with clear diagnostic. QEMU should provide MADT.
+
+## Stage 38 — Local APIC Discovery
+
+Create:
+
+```text
+kernel/arch/x86_64/apic.c
+kernel/arch/x86_64/apic.h
+```
+
+Required functions:
+
+```c
+int lapic_discover(void);
+uint64_t lapic_physical_base(void);
+uint64_t lapic_virtual_base(void);
+uint32_t lapic_read(uint32_t offset);
+void lapic_write(uint32_t offset, uint32_t value);
+```
+
+Use MADT base first.
+
+Also read APIC base MSR if MSR helpers already exist or add:
+
+```c
+uint64_t x86_read_msr(uint32_t msr);
+void x86_write_msr(uint32_t msr, uint64_t value);
+```
+
+APIC base MSR:
+
+```text
+0x1B
+```
+
+Required mapping:
+
+```text
+Map Local APIC MMIO page through VMM.
+Use cache-disable / write-through flags.
+```
+
+Success:
+
+```text
+[OK] Local APIC discovered
+```
+
+## Stage 39 — Local APIC Enable
+
+Required function:
+
+```c
+void lapic_enable(void);
+```
+
+Must:
+
+```text
+set APIC global enable bit in IA32_APIC_BASE MSR if needed
+set spurious interrupt vector register
+enable APIC software bit
+```
+
+Use spurious vector:
+
+```c
+#define LAPIC_SPURIOUS_VECTOR 0xF0
+```
+
+Success:
+
+```text
+[OK] Local APIC enabled
+```
+
+## Stage 40 — Local APIC EOI Support
+
+Required function:
+
+```c
+void lapic_send_eoi(void);
+```
+
+Called after timer IRQ handling.
+
+Do not send EOI for CPU exceptions.
+
+Only send EOI for hardware interrupts.
+
+Success:
+
+```text
+EOI path exists and timer interrupt does not wedge after first tick.
+```
+
+## Stage 41 — IRQ Dispatcher
+
+`irq_dispatch` must:
+
+```text
+look up registered handler for vector
+call handler
+send EOI for APIC hardware interrupt vectors
+track interrupt counts
+handle unregistered IRQs with warning
+```
+
+Required functions:
+
+```c
+uint64_t irq_count_for_vector(uint8_t vector);
+void irq_dump_counts(void);
+```
+
+Success:
+
+```text
+timer vector count increases during boot
+```
+
+## Stage 42 — IRQ Assembly Stubs
+
+Create:
+
+```text
+kernel/arch/x86_64/irq_stubs.S
+```
+
+Implement stubs for at least:
+
+```text
+0x20–0x2F
+0x30
+0xF0
+```
+
+Each stub must:
+
+```text
+push vector
+push fake error code 0
+save general-purpose registers
+build irq_context
+call irq_dispatch
+restore registers
+iretq
+```
+
+These are interrupt gates.
+
+Do not confuse IRQ stubs with exception stubs.
+
+Success:
+
+```text
+hardware timer IRQ enters irq_dispatch
+```
+
+## Stage 43 — PIT Timer Driver
+
+Create:
+
+```text
+kernel/arch/x86_64/pit.c
+kernel/arch/x86_64/pit.h
+```
+
+PIT base frequency:
+
+```c
+#define PIT_BASE_FREQUENCY 1193182
+```
+
+Required functions:
+
+```c
+void pit_init_periodic(uint32_t hz);
+void pit_stop(void);
+uint64_t pit_ticks(void);
+```
+
+Use PIT channel 0.
+
+PIT may be used for:
+
+```text
+fallback periodic timer
+calibrating local APIC timer
+```
+
+Success:
+
+```text
+[OK] PIT timer online
+```
+
+## Stage 44 — Local APIC Timer Driver
+
+Create:
+
+```text
+kernel/arch/x86_64/lapic_timer.c
+kernel/arch/x86_64/lapic_timer.h
+```
+
+Required functions:
+
+```c
+void lapic_timer_init(uint32_t hz);
+void lapic_timer_stop(void);
+uint64_t lapic_timer_ticks(void);
+```
+
+Recommended:
+
+```text
+Use PIT to calibrate APIC timer if feasible.
+Fallback to conservative initial count if calibration is not stable yet.
+```
+
+Required APIC timer vector:
+
+```c
+#define LAPIC_TIMER_VECTOR 0x30
+```
+
+Timer frequency target:
+
+```c
+#define KERNEL_TIMER_HZ 100
+```
+
+Success:
+
+```text
+[OK] Local APIC timer online
+```
+
+If APIC timer cannot be made reliable in one pass, PIT timer may temporarily drive scheduler, but this must be documented. Preferred result is APIC timer.
+
+## Stage 45 — Timer Abstraction
+
+Create:
+
+```text
+kernel/arch/x86_64/timer.c
+kernel/arch/x86_64/timer.h
+```
+
+Required functions:
+
+```c
+void kernel_timer_init(void);
+uint64_t kernel_ticks(void);
+uint64_t kernel_uptime_ms(void);
+void kernel_timer_on_tick(void);
+```
+
+`kernel_timer_on_tick` must be called from the active timer IRQ.
+
+Success:
+
+```text
+[OK] Kernel tick online
+```
+
+## Stage 46 — Kernel Tick Counter
+
+Implement monotonic tick counter:
+
+```c
+volatile uint64_t g_kernel_ticks;
+```
+
+At 100 Hz:
+
+```text
+1 tick = 10 ms
+```
+
+Required behavior:
+
+```text
+tick count increases only from timer interrupt
+uptime derived from tick count
+```
+
+Verification target must prove tick count increases.
+
+## Stage 47 — Kernel Thread Structure
+
+Create:
+
+```text
+kernel/sched/thread.c
+kernel/sched/thread.h
+```
+
+For Prompt 3, these are kernel threads only, not user processes.
+
+Required states:
+
+```c
+enum thread_state {
+    THREAD_NEW,
+    THREAD_READY,
+    THREAD_RUNNING,
+    THREAD_SLEEPING,
+    THREAD_BLOCKED,
+    THREAD_DEAD
+};
+```
+
+Required structure:
+
+```c
+struct thread {
+    uint64_t id;
+    const char *name;
+    enum thread_state state;
+
+    uint64_t *kernel_stack_base;
+    uint64_t *kernel_stack_top;
+    uint64_t rsp;
+
+    uint64_t wake_tick;
+
+    void (*entry)(void *);
+    void *arg;
+
+    struct thread *next;
+};
+```
+
+Required functions:
+
+```c
+void thread_system_init(void);
+struct thread *thread_create(const char *name, void (*entry)(void *), void *arg);
+void thread_destroy(struct thread *thread);
+struct thread *thread_current(void);
+uint64_t thread_current_id(void);
+void thread_exit(void);
+```
+
+Use `kmalloc` for thread structures.
+
+Use PMM/VMM/heap for stacks.
+
+Minimum kernel stack size:
+
+```c
+#define THREAD_KERNEL_STACK_SIZE 16384
+```
+
+Success:
+
+```text
+kernel can create at least 3 kernel threads
+```
+
+## Stage 48 — Kernel Context Switch Assembly
+
+Create:
+
+```text
+kernel/sched/context_switch.S
 ```
 
 Required function:
 
 ```c
-void page_fault_dump(struct x86_trap_frame *frame);
+void context_switch(uint64_t *old_rsp, uint64_t new_rsp);
 ```
 
-For Prompt 2, page faults panic.
-
-Success:
+Must save/restore callee-saved registers:
 
 ```text
-If a page fault occurs, it prints clear diagnostic information instead of rebooting.
+rbx
+rbp
+r12
+r13
+r14
+r15
+rsp
 ```
 
-## Stage 27 — CPU Halt and Panic Hardening
-
-Update:
-
-```text
-kernel/src/panic.c
-kernel/include/panic.h
-kernel/arch/x86_64/halt.S
-```
-
-Panic must:
-
-```text
-disable interrupts
-print panic banner
-print message
-halt forever with hlt loop
-```
-
-Required functions:
+Thread initial stack must be prepared so first switch enters a trampoline:
 
 ```c
-void kernel_panic(const char *message);
-void kernel_panic_hex(const char *message, uint64_t value);
-void kernel_halt_forever(void);
+void thread_trampoline(void);
+```
+
+Trampoline calls:
+
+```text
+current_thread->entry(current_thread->arg)
+thread_exit()
 ```
 
 Success:
 
 ```text
-Kernel panic never returns.
-QEMU does not silently reboot.
+[OK] Context switch online
 ```
 
-## Stage 28 — Physical Memory Map Parser
+## Stage 49 — Ready Queue
+
+Create ready queue in scheduler.
+
+Required operations:
+
+```c
+void scheduler_add_thread(struct thread *thread);
+struct thread *scheduler_pick_next(void);
+void scheduler_enqueue_ready(struct thread *thread);
+```
+
+Queue type can be simple singly-linked list.
+
+Prompt 3 does not need priorities.
+
+## Stage 50 — Round-Robin Scheduler
 
 Create:
 
 ```text
-kernel/memory/memory_layout.h
-kernel/memory/pmm.h
-kernel/memory/pmm.c
-```
-
-The PMM must consume the UEFI memory map from:
-
-```c
-boot_info->memory_map
-```
-
-It must parse UEFI descriptors without relying on bootloader UEFI headers.
-
-Define a kernel-side UEFI memory descriptor struct compatible with what the bootloader passes:
-
-```c
-struct efi_memory_descriptor_kernel {
-    uint32_t type;
-    uint32_t padding;
-    uint64_t physical_start;
-    uint64_t virtual_start;
-    uint64_t number_of_pages;
-    uint64_t attribute;
-};
-```
-
-Use descriptor size from boot_info, not `sizeof`.
-
-Identify usable memory:
-
-```text
-EfiConventionalMemory
-```
-
-Be conservative with all other types.
-
-Reserve:
-
-```text
-physical page 0
-kernel image range
-boot info range
-memory map range
-framebuffer range
-ACPI reclaim/NVS ranges
-UEFI runtime ranges
-```
-
-For Prompt 2, it is acceptable to treat BootServicesCode/Data as reserved until a later cleanup stage.
-
-Success output:
-
-```text
-[OK] physical memory map parsed
-total memory: X MiB
-usable memory: X MiB
-reserved memory: X MiB
-```
-
-## Stage 29 — Physical Page Allocator
-
-Implement a bitmap-based page frame allocator.
-
-Page size:
-
-```text
-4096 bytes
+kernel/sched/scheduler.c
+kernel/sched/scheduler.h
 ```
 
 Required functions:
 
 ```c
-void pmm_init(const struct boot_info *boot_info);
-uint64_t pmm_alloc_page(void);
-void pmm_free_page(uint64_t physical_address);
-uint64_t pmm_total_pages(void);
-uint64_t pmm_free_pages(void);
-uint64_t pmm_used_pages(void);
-void pmm_dump_stats(void);
+void scheduler_init(void);
+void scheduler_start(void);
+void scheduler_yield(void);
+void scheduler_on_timer_tick(void);
+struct thread *scheduler_current_thread(void);
+uint64_t scheduler_switch_count(void);
 ```
 
 Rules:
 
 ```text
-Return physical addresses.
-Never allocate reserved pages.
-Never allocate page 0.
-Page addresses must be 4096-byte aligned.
-Detect double-free if practical.
-Detect invalid free if practical.
+single-core only
+round-robin only
+no process abstraction
+no user mode
+no priority
+no SMP
 ```
 
-Bitmap placement:
+The scheduler must switch among READY threads.
+
+Success:
 
 ```text
-The PMM bitmap itself must live in usable physical memory.
-The pages containing the bitmap must be marked used.
+[OK] Scheduler online
 ```
 
-Simple approach:
-
-```text
-find largest usable region
-place bitmap at beginning of that region
-mark bitmap pages used
-```
-
-Success test:
-
-```text
-allocate 16 pages
-verify nonzero aligned addresses
-free them
-free count returns to original
-```
-
-Success output:
-
-```text
-[OK] page allocator online
-```
-
-## Stage 30 — Kernel Virtual Memory Constants
+## Stage 51 — Idle Thread
 
 Create:
 
 ```text
-kernel/memory/memory_layout.h
-kernel/memory/vmm.h
-kernel/memory/vmm.c
-kernel/arch/x86_64/paging.h
+kernel/sched/idle.c
+kernel/sched/idle.h
 ```
 
-Define the intended layout, even if Prompt 2 only partially uses it.
+Idle thread behavior:
 
-Required constants:
+```text
+enable interrupts
+hlt loop
+```
+
+Required function:
 
 ```c
-#define PAGE_SIZE 4096ULL
-
-#define KERNEL_PHYSICAL_BASE 0x100000ULL
-
-#define KERNEL_HIGHER_HALF_BASE 0xFFFFFFFF80000000ULL
-#define KERNEL_DIRECT_MAP_BASE  0xFFFF800000000000ULL
-#define KERNEL_HEAP_BASE        0xFFFF900000000000ULL
-#define KERNEL_HEAP_SIZE        0x0000000010000000ULL
+void idle_thread_entry(void *arg);
 ```
 
-Important:
+The scheduler must always have an idle thread to run if nothing else is ready.
 
-Prompt 2 may keep the kernel running in its current identity/UEFI-provided mapping if switching to a higher-half mapping is too risky in one pass.
-
-However, Prompt 2 must at least build the page table abstraction and own page tables.
-
-Preferred outcome:
-
-```text
-Kernel installs its own PML4.
-Identity maps early kernel region.
-Maps framebuffer.
-Maps required boot structures.
-Adds direct map for available physical memory.
-Keeps current kernel execution stable.
-```
-
-Higher-half execution can be deferred only if clearly documented.
-
-## Stage 31 — Kernel Page Table Builder
-
-Create/implement:
-
-```text
-kernel/arch/x86_64/paging.c
-kernel/arch/x86_64/paging.h
-kernel/memory/vmm.c
-kernel/memory/vmm.h
-```
-
-Required page table functions:
-
-```c
-void vmm_init(const struct boot_info *boot_info);
-int vmm_map_page(uint64_t virtual_address, uint64_t physical_address, uint64_t flags);
-int vmm_unmap_page(uint64_t virtual_address);
-uint64_t vmm_get_physical(uint64_t virtual_address);
-void vmm_load_kernel_address_space(void);
-```
-
-Required x86-64 page flags:
-
-```c
-#define PAGE_PRESENT
-#define PAGE_WRITABLE
-#define PAGE_USER
-#define PAGE_WRITE_THROUGH
-#define PAGE_CACHE_DISABLE
-#define PAGE_ACCESSED
-#define PAGE_DIRTY
-#define PAGE_HUGE
-#define PAGE_GLOBAL
-#define PAGE_NO_EXECUTE
-```
-
-Required maps:
-
-```text
-kernel code/data/bss
-kernel stack
-framebuffer MMIO range
-boot_info page
-UEFI memory map pages
-PMM bitmap pages
-low identity area needed for current execution
-```
-
-If direct map is implemented:
-
-```text
-physical 0 → KERNEL_DIRECT_MAP_BASE + 0
-```
-
-Required safety:
-
-```text
-do not unmap currently executing code
-do not unmap current stack
-do not unmap framebuffer before console replacement is ready
-```
-
-Success output:
-
-```text
-[OK] kernel page tables built
-[OK] kernel CR3 loaded
-```
-
-If loading custom CR3 is deferred, output must say:
-
-```text
-[WARN] custom CR3 built but not loaded
-```
-
-But the preferred acceptance is custom CR3 loaded.
-
-## Stage 32 — Kernel Heap Allocator
+## Stage 52 — Sleep/Wakeup System
 
 Create:
 
 ```text
-kernel/memory/heap.h
-kernel/memory/heap.c
+kernel/sched/sleep.c
+kernel/sched/sleep.h
 ```
 
-Implement a simple early heap.
-
-The heap may be:
-
-```text
-bump allocator first
-```
-
-But it must have this interface:
+Required functions:
 
 ```c
-void heap_init(void);
-void *kmalloc(uint64_t size);
-void *kcalloc(uint64_t count, uint64_t size);
-void kfree(void *ptr);
-void heap_dump_stats(void);
+void thread_sleep_ticks(uint64_t ticks);
+void thread_sleep_ms(uint64_t milliseconds);
+void sleep_wakeup_expired(uint64_t current_tick);
 ```
 
-For Prompt 2, `kfree` may be a no-op if documented as early bump allocator behavior.
-
-However, the public API must exist so later stages can replace the implementation.
-
-Heap source options:
+Rules:
 
 ```text
-use a statically reserved kernel heap array
-or use PMM pages mapped into kernel heap virtual range
+sleeping thread has wake_tick
+timer tick checks sleeping list
+expired sleeping threads move to ready queue
 ```
 
-Preferred:
+Success:
 
 ```text
-use PMM pages for heap backing if VMM is active
+[OK] Sleep/wakeup online
 ```
 
-Fallback allowed:
+## Stage 53 — Timer Preemption
+
+Timer interrupt must call:
+
+```c
+scheduler_on_timer_tick();
+```
+
+Required behavior:
 
 ```text
-static early heap region in .bss
+tick increments
+sleeping threads wake
+current thread time slice decreases
+when time slice expires, scheduler switches threads
 ```
 
-Success test:
+Default quantum:
+
+```c
+#define SCHEDULER_TIME_SLICE_TICKS 5
+```
+
+At 100 Hz, this is about 50 ms.
+
+Success:
 
 ```text
-kmalloc 64 bytes
-kmalloc 4096 bytes
-kcalloc array
-verify zeroed memory
+[OK] Timer preemption online
 ```
 
-Success output:
-
-```text
-[OK] kernel heap online
-```
-
-## Stage 33 — Early Kernel Test Framework
+## Stage 54 — Scheduler Tests and Verification
 
 Create:
 
 ```text
-kernel/tests/early_tests.h
-kernel/tests/early_tests.c
+kernel/tests/scheduler_tests.c
+kernel/tests/scheduler_tests.h
 ```
 
-Required tests:
+Required function:
 
 ```c
-void early_tests_run(void);
+void scheduler_tests_start(void);
 ```
 
-Test categories:
+Test threads:
 
 ```text
-boot_info validation
-string/memory helpers
-serial/log smoke test
-GDT/IDT installed flag checks
-PMM allocate/free
-VMM map/translate if safe
-heap allocation
+thread A increments counter A then yields/sleeps
+thread B increments counter B then yields/sleeps
+thread C increments counter C then yields/sleeps
 ```
 
-Tests must print:
+Required pass condition:
 
 ```text
-[TEST] name
-[PASS] name
+after enough ticks:
+counter A > 0
+counter B > 0
+counter C > 0
+scheduler_switch_count > 0
+kernel_ticks increased
+sleep/wakeup happened at least once
 ```
 
-If a required test fails:
+Required output:
 
 ```text
-[PANIC] early test failed: name
+[TEST] scheduler round-robin
+[PASS] scheduler round-robin
+[TEST] sleep/wakeup
+[PASS] sleep/wakeup
+[TEST] timer preemption
+[PASS] timer preemption
+[OK] Scheduler tests passed
 ```
 
-Success output:
+## Verification Targets
+
+### `make verify-interrupts`
+
+Pass if log contains:
 
 ```text
-[OK] early kernel tests passed
+[OK] Legacy PIC disabled
+[OK] ACPI MADT parsed
+[OK] Local APIC discovered
+[OK] Local APIC enabled
+[OK] IRQ dispatcher online
 ```
 
-## Stage 34 — Documentation and Validation
+### `make verify-timer`
 
-Update:
+Pass if log contains:
 
 ```text
-docs/checkpoints.md
-docs/boot_process.md
-docs/build.md
-README.md
+[OK] PIT timer online
+[OK] Local APIC timer online
+[OK] Kernel tick online
 ```
 
-Add Prompt 2 checkpoint:
+And tick count increases.
+
+### `make verify-scheduler`
+
+Pass if log contains:
 
 ```text
-Prompt 2 complete when:
-- make clean succeeds
-- make all succeeds
-- make image succeeds
-- make run boots QEMU
-- bootloader still reaches kernel
-- kernel initializes serial
-- kernel loads GDT/TSS/IDT
-- exceptions are installed
-- PMM parses UEFI memory map
-- page allocator passes allocate/free tests
-- kernel page table code builds and either loads CR3 or documents why loading is deferred
-- page fault handler prints diagnostics
-- heap allocator passes smoke tests
-- QEMU does not reset or triple fault
+[OK] Context switch online
+[OK] Scheduler online
+[OK] Sleep/wakeup online
+[OK] Scheduler tests passed
 ```
 
-## Required Final Boot Log
+### `make verify-preemption`
 
-The final boot log should include:
+Pass if log contains:
 
 ```text
-MyOS Kernel 0.0.2
-[OK] Kernel entered
-[OK] Boot info magic valid
-[OK] Framebuffer console online
-[OK] Serial online
-[OK] Kernel logger online
-[OK] CPU state readable
-[OK] GDT loaded
-[OK] TSS loaded
-[OK] IDT loaded
-[OK] Exceptions online
-[OK] Physical memory map parsed
-[OK] Physical memory manager online
-[OK] Page allocator online
-[OK] Kernel page tables built
-[OK] Kernel CR3 loaded
-[OK] Page fault handler online
-[OK] Kernel heap online
-[OK] Early kernel tests passed
+[OK] Timer preemption online
+[PASS] timer preemption
 ```
 
-If CR3 loading is not safe yet, the only acceptable alternate line is:
+### `make verify-prompt3`
+
+Runs:
 
 ```text
-[WARN] Custom CR3 built but not loaded
+verify-boot
+verify-exception
+verify-pagefault
+verify-interrupts
+verify-timer
+verify-scheduler
+verify-preemption
 ```
 
-But still implement all page table construction code.
+Prompt 3 is complete only if all pass.
 
-## Prompt 2 Acceptance Criteria
+## Boot Order Required in `kernel_main`
 
-Prompt 2 is complete only when:
+Update `kernel_main` to initialize in this order:
+
+```text
+validate boot_info enough for framebuffer
+framebuffer console init
+serial init
+kernel logger init
+print MyOS Kernel 0.0.3
+
+validate full boot_info
+CPU state helpers
+GDT
+TSS
+IDT
+exceptions
+PMM
+VMM
+heap
+Prompt 2.5 early tests
+
+PIC disable
+MADT parse
+Local APIC discover
+Local APIC enable
+IRQ dispatcher
+IRQ stubs installed in IDT
+PIT init
+Local APIC timer init
+kernel timer init
+thread system init
+scheduler init
+scheduler tests start
+scheduler start
+```
+
+Once scheduler starts, control should not return to normal linear boot flow.
+
+If scheduler returns, panic.
+
+## Completion Criteria
+
+Prompt 3 is complete only when:
 
 ```bash
 make clean
 make all
 make image
-make run
-```
-
-works and QEMU shows the Stage 1–16 bootloader still functioning plus the Stage 2 kernel foundation logs.
-
-Also verify:
-
-```bash
+make verify-boot
+make verify-exception
+make verify-pagefault
+make verify-interrupts
+make verify-timer
+make verify-scheduler
+make verify-preemption
+make verify-prompt3
+make verify-qemu-matrix
 make debug
 ```
 
-still launches QEMU paused with GDB stub.
+succeed or fail with clear `[DEP MISSING]` messages.
 
-Final response must include:
+Final report must include:
 
 ```text
 1. Files created/modified
-2. make all result
-3. make image result
-4. make run result
-5. Whether custom CR3 is loaded or deferred
-6. Any missing host dependencies
-7. Exact next milestone after Prompt 2
+2. Source line count by category
+3. make all result
+4. make image result
+5. verify-boot result
+6. verify-exception result
+7. verify-pagefault result
+8. verify-interrupts result
+9. verify-timer result
+10. verify-scheduler result
+11. verify-preemption result
+12. verify-prompt3 result
+13. verify-qemu-matrix result
+14. Whether APIC timer or PIT fallback drives scheduling
+15. Whether context switching is working
+16. Whether timer preemption is working
+17. Exact next milestone
 ```
 
-## Exact Next Milestone After Prompt 2
+## Exact Next Milestone After Prompt 3
 
-After Prompt 2, the next milestone is Prompt 3:
+Prompt 4:
 
 ```text
-Interrupt controller and scheduler foundation:
-PIC disable hardening, Local APIC discovery/init, timer source, IRQ routing, kernel threads, context switching, round-robin scheduler, sleep/wakeup, timer preemption.
+User/kernel boundary:
+ring 3 transition, syscall entry, syscall table, user address spaces, simple executable format, initramfs, first user program, write/exit/read/sleep/getpid/yield syscalls.
 ```

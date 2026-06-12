@@ -26,4 +26,9 @@ uint64_t vmm_get_physical(uint64_t virtual_address);
  * success, 0 on failure. */
 int      vmm_validate_required_mappings(const struct boot_info *boot_info);
 
+/* Re-map one identity 2 MiB page as MMIO (cache-disable + write-through).
+ * `phys` must be 2 MiB aligned. Used for the Local APIC window. Returns 0 on
+ * success. */
+int      vmm_map_mmio_2m(uint64_t phys);
+
 #endif /* MYOS_VMM_H */

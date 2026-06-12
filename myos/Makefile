@@ -36,11 +36,14 @@ BOOT_CFLAGS := --target=x86_64-unknown-windows -ffreestanding -fshort-wchar \
 BOOT_LDFLAGS := /subsystem:efi_application /entry:EfiMain /nodefaultlib
 
 KERN_INCLUDES := -Ikernel/include -Ikernel/arch/x86_64 -Ikernel/memory \
-                 -Ikernel/tests -Ishared/include
+                 -Ikernel/sched -Ikernel/tests -Ishared/include
 # EXTRA_KCFLAGS is injected by the verify-* targets to enable destructive tests.
 EXTRA_KCFLAGS ?=
+# -mno-sse/-mno-mmx/-msoft-float: IRQ stubs save only the GPRs, so the kernel
+# must never touch FP/SIMD state (an async timer IRQ would corrupt it).
 KERN_CFLAGS := --target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protector \
                -fno-builtin -fno-pic -fno-pie -mno-red-zone -mcmodel=kernel \
+               -mno-sse -mno-sse2 -mno-mmx -msoft-float \
                -nostdlib -Wall -Wextra $(KERN_INCLUDES) $(EXTRA_KCFLAGS)
 KERN_ASFLAGS := --target=x86_64-unknown-none-elf $(KERN_INCLUDES)
 KERN_LDFLAGS := -T kernel/arch/x86_64/linker.ld
@@ -53,16 +56,17 @@ BOOT_HDR := $(wildcard bootloader/include/*.h) shared/include/boot_info.h
 # Kernel C/asm sources span src/, arch/x86_64/, memory/, tests/. Object file
 # names are flattened into build/kernel/ (basenames are unique across dirs).
 KERN_CSRC := $(wildcard kernel/src/*.c) $(wildcard kernel/arch/x86_64/*.c) \
-             $(wildcard kernel/memory/*.c) $(wildcard kernel/tests/*.c)
-KERN_SSRC := $(wildcard kernel/arch/x86_64/*.S)
+             $(wildcard kernel/memory/*.c) $(wildcard kernel/sched/*.c) \
+             $(wildcard kernel/tests/*.c)
+KERN_SSRC := $(wildcard kernel/arch/x86_64/*.S) $(wildcard kernel/sched/*.S)
 KERN_OBJ  := $(addprefix $(B_KERN)/,$(notdir $(KERN_CSRC:.c=.o))) \
              $(addprefix $(B_KERN)/,$(notdir $(KERN_SSRC:.S=.o)))
 KERN_HDR  := $(wildcard kernel/include/*.h) $(wildcard kernel/arch/x86_64/*.h) \
-             $(wildcard kernel/memory/*.h) $(wildcard kernel/tests/*.h) \
-             shared/include/boot_info.h
+             $(wildcard kernel/memory/*.h) $(wildcard kernel/sched/*.h) \
+             $(wildcard kernel/tests/*.h) shared/include/boot_info.h
 
-vpath %.c kernel/src kernel/arch/x86_64 kernel/memory kernel/tests
-vpath %.S kernel/arch/x86_64
+vpath %.c kernel/src kernel/arch/x86_64 kernel/memory kernel/sched kernel/tests
+vpath %.S kernel/arch/x86_64 kernel/sched
 
 BOOTX64 := $(B_BOOT)/BOOTX64.EFI
 KERNEL  := $(B_KERN)/kernel.elf
@@ -77,7 +81,9 @@ endef
 # ---- Phony targets ---------------------------------------------------------
 .PHONY: all bootloader kernel image run debug clean dirs \
         inspect loc run-headless \
-        verify-boot verify-exception verify-pagefault verify-qemu-matrix
+        verify-boot verify-exception verify-pagefault verify-qemu-matrix \
+        verify-interrupts verify-timer verify-scheduler verify-preemption \
+        verify-prompt3
 .DEFAULT_GOAL := all
 
 all: bootloader kernel
@@ -164,7 +170,7 @@ verify-boot: image
 	$(call need,$(PY),Install Python 3.)
 	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name boot --timeout 60 \
 	  --log $(B_IMG)/serial.log \
-	  --expect "MyOS Kernel 0.0.2" \
+	  --expect "MyOS Kernel 0.0.3" \
 	  --expect "[OK] Kernel entered" \
 	  --expect "[OK] GDT loaded" \
 	  --expect "[OK] TSS loaded" \
@@ -203,6 +209,54 @@ verify-pagefault:
 	$(MAKE) clean
 	$(MAKE) image
 	@echo "[OK] verify-pagefault complete (normal image restored)"
+
+# ---- Prompt 3 verification --------------------------------------------------
+verify-interrupts: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name interrupts --timeout 60 \
+	  --log $(B_IMG)/interrupts.log \
+	  --expect "[OK] Legacy PIC disabled" \
+	  --expect "[OK] ACPI MADT parsed" \
+	  --expect "[OK] Local APIC discovered" \
+	  --expect "[OK] Local APIC enabled" \
+	  --expect "[OK] IRQ dispatcher online"
+
+verify-timer: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name timer --timeout 60 \
+	  --log $(B_IMG)/timer.log \
+	  --expect "[OK] PIT timer online" \
+	  --expect "[OK] Local APIC timer online" \
+	  --expect "[OK] Kernel tick online" \
+	  --expect "[OK] Kernel ticks increasing"
+
+verify-scheduler: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name scheduler --timeout 60 \
+	  --log $(B_IMG)/scheduler.log \
+	  --expect "[OK] Context switch online" \
+	  --expect "[OK] Scheduler online" \
+	  --expect "[OK] Sleep/wakeup online" \
+	  --expect "[PASS] scheduler round-robin" \
+	  --expect "[PASS] sleep/wakeup" \
+	  --expect "[OK] Scheduler tests passed"
+
+verify-preemption: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name preemption --timeout 60 \
+	  --log $(B_IMG)/preemption.log \
+	  --expect "[OK] Timer preemption online" \
+	  --expect "[PASS] timer preemption"
+
+verify-prompt3:
+	$(MAKE) verify-boot
+	$(MAKE) verify-exception
+	$(MAKE) verify-pagefault
+	$(MAKE) verify-interrupts
+	$(MAKE) verify-timer
+	$(MAKE) verify-scheduler
+	$(MAKE) verify-preemption
+	@echo "[OK] verify-prompt3 passed"
 
 # ---- Memory-size matrix ----------------------------------------------------
 verify-qemu-matrix: image

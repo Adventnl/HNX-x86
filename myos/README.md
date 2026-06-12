@@ -50,17 +50,29 @@ Implemented:
   headless verification targets, audited ISR trap frame, low-1 MiB PMM
   reservation + diagnostics + stress test, CR3 read-back/mapping validation,
   pixel-format-aware framebuffer packing, and opt-in destructive test flags.
+- **Prompt 3 (stages 35–54):** interrupt + scheduler foundation — legacy PIC
+  disabled, ACPI MADT parsed, Local APIC enabled, dedicated IRQ
+  dispatcher/stubs, PIT-calibrated **LAPIC timer at 100 Hz**, kernel tick,
+  kernel threads with assembly context switch, FIFO round-robin scheduler
+  (50 ms quantum), idle thread, tick-based sleep/wakeup, and timer preemption
+  — all proven by on-boot scheduler self-tests. Boots to `MyOS Kernel 0.0.3`.
 
 ### What is tested how
 - **Tested by normal boot** (`make verify-boot`): bootloader, serial, logging,
   GDT/TSS/IDT, PMM, VMM/CR3, heap, early self-tests.
+- **Tested by on-boot scheduler self-tests** (`make verify-scheduler` /
+  `verify-timer` / `verify-interrupts` / `verify-preemption`): LAPIC timer
+  ticks, context switching, round-robin fairness, sleep/wakeup, and
+  quantum-expiry preemption (a deliberately busy thread is preempted while a
+  yielding thread keeps making progress).
 - **Tested by destructive verification targets:** CPU exceptions
   (`make verify-exception`, #UD) and page faults (`make verify-pagefault`, #PF).
 - **Tested across RAM sizes:** `make verify-qemu-matrix` (128M–2048M).
-- **Not yet implemented:** interrupts/IRQs, timer, scheduler, threads, user
-  mode, syscalls, drivers, FS, network, GUI, SMP.
+- **Not yet implemented:** user mode, syscalls, processes, I/O APIC routing,
+  drivers, FS, network, GUI, SMP, signals, permissions.
 - **Intentionally deferred:** `kfree` reclamation (bump allocator no-op),
-  direct-map population, BootServices memory reclaim.
+  dead-thread stack reclamation, BootServices memory reclaim, I/O APIC
+  programming (the PIT line is unrouted; the LAPIC timer is the tick source).
 
 See [docs/checkpoints.md](docs/checkpoints.md) for the full per-stage table,
 PMM/VMM design, and verification status.
@@ -75,6 +87,6 @@ This is an early boot + kernel-foundation project, by design:
 - Every claimed capability is backed by a `make verify-*` target rather than
   prose. Small and verified beats large and fake.
 
-Next milestone: **Prompt 3 — interrupt controller and scheduler foundation**
-(PIC disable hardening, Local APIC, timer source, IRQ routing, kernel threads,
-context switching, round-robin scheduler, sleep/wakeup, timer preemption).
+Next milestone: **Prompt 4 — user/kernel boundary** (ring 3 transition,
+syscall entry, syscall table, user address spaces, simple executable format,
+initramfs, first user program, write/exit/read/sleep/getpid/yield syscalls).

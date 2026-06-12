@@ -25,7 +25,7 @@ make debug       # same as run but halted with a gdb stub on :1234
 make clean       # remove build artifacts
 ```
 
-## Verification & inspection (Prompt 2.5)
+## Verification & inspection (Prompt 2.5 / Prompt 3)
 ```bash
 make inspect            # file/ELF header/program headers/symbols of the binaries
 make loc                # source line counts by category (excludes build/)
@@ -33,8 +33,20 @@ make run-headless       # run with no window; serial still on stdio
 make verify-boot        # headless boot; assert the full boot log on serial
 make verify-exception   # build with -DMYOS_TEST_INVALID_OPCODE; assert #UD dump
 make verify-pagefault   # build with -DMYOS_TEST_PAGE_FAULT; assert #PF dump
+make verify-interrupts  # PIC disabled, MADT parsed, LAPIC up, IRQ dispatcher up
+make verify-timer       # PIT + LAPIC timer online, kernel ticks increasing
+make verify-scheduler   # context switch + round-robin + sleep/wakeup tests pass
+make verify-preemption  # quantum-expiry preemption observed
+make verify-prompt3     # boot + #UD + #PF + interrupts + timer + sched + preempt
 make verify-qemu-matrix # boot-verify across 128M/256M/512M/1024M/2048M
 ```
+
+### Kernel FP/SIMD policy (Prompt 3)
+The kernel is compiled with `-mno-sse -mno-sse2 -mno-mmx -msoft-float`. The
+IRQ stubs save only general-purpose registers, so the kernel must never touch
+FP/SIMD state — an asynchronous timer interrupt would silently corrupt it
+otherwise. This is a permanent kernel-mode rule (user-space FP state handling
+arrives with the user/kernel boundary work).
 The `verify-*` targets use `tools/verify_qemu.py`, which runs QEMU headless,
 captures COM1 serial to `build/image/<name>.log`, and prints `[PASS]`/`[FAIL]`.
 No GUI is required. `verify-exception`/`verify-pagefault` build a *separate*

@@ -37,6 +37,20 @@ static inline void x86_invlpg(void *addr) {
     __asm__ volatile("invlpg (%0)" : : "r"(addr) : "memory");
 }
 
+/* ---- MSR access ----------------------------------------------------------- */
+#define MSR_APIC_BASE 0x1B
+
+static inline uint64_t x86_read_msr(uint32_t msr) {
+    uint32_t lo, hi;
+    __asm__ volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr));
+    return ((uint64_t)hi << 32) | lo;
+}
+
+static inline void x86_write_msr(uint32_t msr, uint64_t value) {
+    __asm__ volatile("wrmsr" : : "c"(msr),
+                     "a"((uint32_t)value), "d"((uint32_t)(value >> 32)));
+}
+
 /* RFLAGS bits. */
 #define RFLAGS_IF (1ULL << 9)
 

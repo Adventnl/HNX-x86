@@ -13,6 +13,16 @@
 #include "vmm.h"
 #include "heap.h"
 #include "early_tests.h"
+#include "pic.h"
+#include "madt.h"
+#include "apic.h"
+#include "irq.h"
+#include "pit.h"
+#include "timer.h"
+#include "thread.h"
+#include "scheduler.h"
+#include "sleep.h"
+#include "scheduler_tests.h"
 
 static const struct boot_info *g_boot_info;
 
@@ -56,7 +66,7 @@ void kernel_main(struct boot_info *bi) {
     fbcon_set_color(0x00FFFFFF, 0x00000000);
     fbcon_clear(0x00000000);
 
-    kernel_log_line("MyOS Kernel 0.0.2");
+    kernel_log_line("MyOS Kernel 0.0.3");
     kernel_log_ok("Kernel entered");
     kernel_log_ok("Boot info magic valid");
     kernel_log_ok("Framebuffer console online");
@@ -116,11 +126,53 @@ void kernel_main(struct boot_info *bi) {
     /* --- Destructive verification hooks (test builds only) --- */
     run_destructive_tests();
 
-    /* --- Early self-tests --- */
+    /* --- Prompt 2.5 early self-tests --- */
     early_tests_run();
     kernel_log_ok("Early kernel tests passed");
+    kernel_log_ok("Prompt 2.5 baseline verification passed");
 
-    kernel_log_line("");
-    kernel_log_line("MyOS kernel foundation ready. Halting.");
-    kernel_halt_forever();
+    /* ===== Prompt 3: interrupts + timers + scheduler ===== */
+
+    /* --- Interrupt controllers --- */
+    pic_disable();
+    kernel_log_ok("Legacy PIC disabled");
+
+    if (madt_init(bi->rsdp_address) != 0) {
+        kernel_panic("ACPI MADT not found or invalid");
+    }
+    kernel_log_ok("ACPI MADT parsed");
+    madt_dump_info();
+
+    if (lapic_discover() != 0) {
+        kernel_panic("Local APIC discovery failed");
+    }
+    kernel_log_ok("Local APIC discovered");
+    kernel_log_hex64("    lapic mmio   : ", lapic_physical_base());
+
+    lapic_enable();
+    kernel_log_ok("Local APIC enabled");
+
+    irq_init();
+    kernel_log_ok("IRQ dispatcher online");
+
+    /* --- Timers (PIT calibrates; LAPIC timer drives the tick) --- */
+    pit_init_periodic(0);                 /* free-running for calibration */
+    kernel_log_ok("PIT timer online");
+
+    kernel_timer_init();                  /* logs LAPIC-timer / fallback line */
+    kernel_log_ok("Kernel tick online");
+
+    /* --- Threads + scheduler --- */
+    thread_system_init();
+    kernel_log_ok("Context switch online");
+
+    scheduler_init();
+    kernel_log_ok("Scheduler online");
+    kernel_log_ok("Sleep/wakeup online");
+    kernel_log_ok("Timer preemption online");
+
+    scheduler_tests_start();
+
+    /* Hand the CPU to the scheduler; the boot context is never resumed. */
+    scheduler_start();
 }

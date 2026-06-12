@@ -149,8 +149,100 @@ Correction/validation pass (no new subsystems). Changes:
 | Interrupts/timer/scheduler/userland | **not yet implemented** (Prompt 3+) |
 | `kfree` reclamation, slab/free-list | **intentionally deferred** |
 
-## Next milestone (after Prompt 2.5)
-**Prompt 3 — interrupt controller and scheduler foundation:** PIC disable
-hardening, Local APIC discovery/init, timer source, IRQ routing, kernel
-threads, context switching, round-robin scheduler, sleep/wakeup, timer
-preemption.
+## Prompt 3 — interrupt controller + scheduler foundation (stages 35–54)
+
+| # | Stage | Where | Done |
+|---|-------|-------|------|
+| 35 | Interrupt subsystem structure | `kernel/arch/x86_64/irq.{c,h}` | ✅ |
+| 36 | Legacy PIC disable hardening | `kernel/arch/x86_64/pic.{c,h}` | ✅ |
+| 37 | ACPI MADT parser | `kernel/arch/x86_64/madt.{c,h}` | ✅ |
+| 38 | Local APIC discovery | `kernel/arch/x86_64/apic.c` (`lapic_discover`) | ✅ |
+| 39 | Local APIC enable | `kernel/arch/x86_64/apic.c` (`lapic_enable`) | ✅ |
+| 40 | Local APIC EOI | `kernel/arch/x86_64/apic.c` (`lapic_send_eoi`) | ✅ |
+| 41 | IRQ dispatcher | `kernel/arch/x86_64/irq.c` | ✅ |
+| 42 | IRQ assembly stubs | `kernel/arch/x86_64/irq_stubs.S` | ✅ |
+| 43 | PIT timer driver | `kernel/arch/x86_64/pit.{c,h}` | ✅ |
+| 44 | Local APIC timer driver | `kernel/arch/x86_64/lapic_timer.{c,h}` | ✅ |
+| 45 | Timer abstraction | `kernel/arch/x86_64/timer.{c,h}` | ✅ |
+| 46 | Kernel tick counter | `kernel/arch/x86_64/timer.c` (`kernel_ticks`) | ✅ |
+| 47 | Kernel thread structure | `kernel/sched/thread.{c,h}` | ✅ |
+| 48 | Context switch assembly | `kernel/sched/context_switch.S` | ✅ |
+| 49 | Ready queue | `kernel/sched/scheduler.c` (FIFO) | ✅ |
+| 50 | Round-robin scheduler | `kernel/sched/scheduler.c` | ✅ |
+| 51 | Idle thread | `kernel/sched/idle.{c,h}` | ✅ |
+| 52 | Sleep/wakeup system | `kernel/sched/sleep.{c,h}` | ✅ |
+| 53 | Timer preemption | `scheduler_on_timer_tick` + `scheduler_irq_exit` | ✅ |
+| 54 | Scheduler tests + verification | `kernel/tests/scheduler_tests.c`, `make verify-*` | ✅ |
+
+### IRQ architecture
+- Hardware IRQs are fully separate from CPU exceptions: dedicated stubs
+  (`irq_stubs.S`) for vectors 0x20–0x2F, 0x30 (LAPIC timer), 0xF0 (spurious),
+  installed as ring-0 interrupt gates (IF=0 inside handlers — no nesting).
+- `irq_dispatch` counts every vector, calls the registered handler, warns once
+  on unregistered vectors, sends the LAPIC EOI, then runs the deferred
+  preemption switch (`scheduler_irq_exit`). Spurious (0xF0) gets no EOI.
+- EOI is deliberately sent **before** any preemption context switch so a
+  switched-away thread can never block the next timer interrupt.
+
+### PIC/APIC design
+- The 8259 PIC is remapped to 0x20/0x28 (so stray IRQs can't corrupt
+  exception vectors) and fully masked at boot: `[OK] Legacy PIC disabled`.
+- The LAPIC base comes from MSR `0x1B` cross-checked with the MADT; its 2 MiB
+  identity page is remapped cache-disable/write-through (`vmm_map_mmio_2m`).
+- LAPIC enabled via spurious-vector register (`0xF0 | enable`), TPR=0.
+
+### MADT parsing
+RSDP (rev ≥ 2 → XSDT, else RSDT, both checksummed) → `APIC` table → entries
+0 (CPU count), 1 (I/O APIC base/GSI, recorded but not yet programmed),
+2 (IRQ0 override), 4 (LAPIC NMI, ignored), 5 (64-bit LAPIC override).
+Packed fields are read with `memcpy` (alignment-safe), entry bounds validated.
+
+### Timer source
+**The LAPIC timer drives scheduling** (periodic, vector 0x30, 100 Hz,
+divide-by-16), calibrated against a 50 ms PIT polled delay (channel-0 down
+counter, wrap-safe delta accumulation — no PIT interrupt needed). The PIT
+fallback path (re-enable PIC for IRQ0 only + PIT periodic) exists but is not
+exercised in QEMU; if taken it logs
+`[WARN] Local APIC timer unavailable, using PIT scheduler timer`.
+Note: PIT interrupts are not routed in the normal path (PIC masked, I/O APIC
+not yet programmed) — the PIT is calibration/polling only.
+
+### Thread model & context switch
+- Kernel threads only; 16 KiB heap-allocated stacks; states
+  NEW/READY/RUNNING/SLEEPING/BLOCKED/DEAD.
+- `context_switch(old_rsp*, new_rsp)` saves rbp/rbx/r12–r15 + RSP (SysV
+  callee-saved set; caller-saved regs are dead across a call, and a preempted
+  thread's full GPR state lives in its `irq_stubs.S` frame).
+- New threads start in `thread_trampoline` (planted as the return slot of a
+  hand-built initial frame, 16-byte-aligned), which does `sti`, runs
+  `entry(arg)`, then `thread_exit()`.
+
+### Scheduler design
+- Single-core round robin, FIFO ready queue, 5-tick (50 ms) quantum, no
+  priorities. The idle thread is never enqueued — it is the fallback when the
+  queue is empty. The boot context is abandoned at `scheduler_start()`.
+- Preemption: the tick handler (IRQ context) wakes sleepers and decrements the
+  quantum; on expiry it sets `need_resched`, and the actual switch happens in
+  `scheduler_irq_exit()` after EOI. A preempted thread resumes later through
+  its interrupted IRQ frame → `iretq`, with no state loss.
+- The whole kernel is compiled `-mno-sse -mno-mmx -msoft-float` because the
+  IRQ stubs save only GPRs.
+
+### Verification (Prompt 3)
+| Target | Asserts |
+|--------|---------|
+| `make verify-interrupts` | PIC disabled, MADT parsed, LAPIC discovered/enabled, IRQ dispatcher online |
+| `make verify-timer` | PIT online, LAPIC timer online, kernel tick online, ticks observed increasing |
+| `make verify-scheduler` | context switch/scheduler/sleep-wakeup online, round-robin + sleep/wakeup tests pass |
+| `make verify-preemption` | preemption online + `[PASS] timer preemption` (quantum-expiry switch observed) |
+| `make verify-prompt3` | all of the above + boot + #UD + #PF |
+
+Scheduler self-tests run on every boot: threads A (yield churn), B (20 ms
+sleep loop), C (8-tick busy spin per round → forced quantum preemption), and a
+checker that validates counters, switch/preempt/wakeup counts and tick
+progress, then prints the `[TEST]`/`[PASS]` protocol.
+
+## Next milestone (after Prompt 3)
+**Prompt 4 — user/kernel boundary:** ring 3 transition, syscall entry, syscall
+table, user address spaces, simple executable format, initramfs, first user
+program, write/exit/read/sleep/getpid/yield syscalls.

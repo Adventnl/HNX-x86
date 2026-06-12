@@ -83,6 +83,20 @@ uint64_t vmm_kernel_pml4(void) {
     return g_pml4;
 }
 
+int vmm_map_mmio_2m(uint64_t phys) {
+    if (phys & LARGE_PAGE_MASK) {
+        return -1;
+    }
+    /* Identity remap with MMIO-safe attributes (overwrites the cached
+     * identity-map entry for this 2 MiB region). */
+    if (paging_map_2m(g_pml4, phys, phys,
+                      PAGE_PRESENT | PAGE_WRITABLE |
+                      PAGE_CACHE_DISABLE | PAGE_WRITE_THROUGH) != K_OK) {
+        return -1;
+    }
+    return 0;
+}
+
 int vmm_map_page(uint64_t va, uint64_t pa, uint64_t flags) {
     return paging_map_4k(g_pml4, va, pa, flags | PAGE_PRESENT) == K_OK ? 0 : -1;
 }
