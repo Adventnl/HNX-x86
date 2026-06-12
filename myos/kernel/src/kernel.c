@@ -23,6 +23,10 @@
 #include "scheduler.h"
 #include "sleep.h"
 #include "scheduler_tests.h"
+#include "initramfs.h"
+#include "user.h"
+#include "syscall.h"
+#include "user_tests.h"
 
 static const struct boot_info *g_boot_info;
 
@@ -66,7 +70,7 @@ void kernel_main(struct boot_info *bi) {
     fbcon_set_color(0x00FFFFFF, 0x00000000);
     fbcon_clear(0x00000000);
 
-    kernel_log_line("MyOS Kernel 0.0.3");
+    kernel_log_line("MyOS Kernel 0.0.4");
     kernel_log_ok("Kernel entered");
     kernel_log_ok("Boot info magic valid");
     kernel_log_ok("Framebuffer console online");
@@ -171,7 +175,21 @@ void kernel_main(struct boot_info *bi) {
     kernel_log_ok("Sleep/wakeup online");
     kernel_log_ok("Timer preemption online");
 
+    /* ===== Prompt 4: user/kernel boundary ===== */
+
+    /* Initramfs (bootloader loaded it into RAM and filled boot_info). */
+    initramfs_init(bi->initramfs_base, bi->initramfs_size);
+    initramfs_dump();
+
+    /* Syscalls + ring-3 entry path. */
+    syscall_init();
+    user_init();
+
+    /* Prompt 3 scheduler self-tests still run alongside the user tests. */
     scheduler_tests_start();
+
+    /* Supervisor thread: launches the first user program + boundary tests. */
+    user_tests_start();
 
     /* Hand the CPU to the scheduler; the boot context is never resumed. */
     scheduler_start();

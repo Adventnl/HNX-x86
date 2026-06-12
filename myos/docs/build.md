@@ -19,11 +19,19 @@ the LLVM linkers (`lld`).
 make all         # build BOOTX64.EFI + kernel.elf
 make bootloader  # build only the EFI application
 make kernel      # build only the kernel ELF
-make image       # build build/image/myos.img (FAT, contains both)
+make user        # build the ring-3 programs (init.hxe, syscall_test.hxe)
+make initramfs   # pack build/image/initramfs.hxf (HXF1)
+make image       # build build/image/myos.img (FAT: BOOTX64.EFI + kernel.elf + initramfs.hxf)
 make run         # boot the image in QEMU + OVMF
 make debug       # same as run but halted with a gdb stub on :1234
 make clean       # remove build artifacts
 ```
+
+### mtools is optional
+`tools/build_image.py` builds the FAT image with `mtools` when present, and
+otherwise falls back to a **built-in pure-Python FAT16 writer** (with VFAT long
+names, so `boot/initramfs.hxf` resolves). No external dependency is required to
+produce a bootable image on any host.
 
 ## Verification & inspection (Prompt 2.5 / Prompt 3)
 ```bash
@@ -40,6 +48,26 @@ make verify-preemption  # quantum-expiry preemption observed
 make verify-prompt3     # boot + #UD + #PF + interrupts + timer + sched + preempt
 make verify-qemu-matrix # boot-verify across 128M/256M/512M/1024M/2048M
 ```
+
+## User/kernel boundary build + verification (Prompt 4)
+```bash
+make verify-user-build  # init.hxe + syscall_test.hxe + initramfs.hxf exist
+make verify-initramfs   # [OK] Initramfs file loaded / loaded / parsed
+make verify-user-mode   # [OK] Ring 3 entry online; first user program exits cleanly
+make verify-syscalls    # every [USER] ... OK marker + boundary tests passed
+make verify-user-fault  # a deliberate ring-3 page fault is isolated; kernel survives
+make verify-prompt4     # all Prompt 3 targets + all of the above
+```
+
+### User-program compiler flags (ring 3, freestanding)
+```
+--target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protector
+-fno-builtin -fno-pic -fno-pie -mno-red-zone -mno-sse -mno-mmx -msoft-float
+-nostdlib -Wall -Wextra   (-Iuser/lib -Ikernel/user for the shared syscall ABI)
+```
+Linked with `ld.lld -T user/linker.ld -z max-page-size=0x1000` (4 KiB page
+granularity; ld.lld's x86-64 default is 2 MiB), then converted to HXE1 by
+`tools/mkhxe.py`. The initramfs is packed by `tools/mkinitramfs.py` (HXF1).
 
 ### Kernel FP/SIMD policy (Prompt 3)
 The kernel is compiled with `-mno-sse -mno-sse2 -mno-mmx -msoft-float`. The

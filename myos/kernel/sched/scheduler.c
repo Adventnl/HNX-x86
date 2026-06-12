@@ -18,6 +18,9 @@
 #include "cpu.h"
 #include "log.h"
 #include "panic.h"
+#include "tss.h"
+#include "paging.h"
+#include "vmm.h"
 
 static struct thread *g_ready_head;
 static struct thread *g_ready_tail;
@@ -31,6 +34,12 @@ static volatile int g_need_resched;
 static uint32_t g_slice;
 static uint64_t g_switch_count;
 static uint64_t g_preempt_count;
+static uint64_t g_kernel_cr3;           /* kernel PML4; threads with cr3==0 use it */
+
+/* Effective CR3 for a thread (0 means the kernel address space). */
+static inline uint64_t thread_cr3(struct thread *t) {
+    return t->cr3 ? t->cr3 : g_kernel_cr3;
+}
 
 static struct thread *ready_dequeue(void) {
     struct thread *t = g_ready_head;
@@ -93,6 +102,17 @@ static void schedule(void) {
     next->state = THREAD_RUNNING;
     g_slice = SCHEDULER_TIME_SLICE_TICKS;
     g_switch_count++;
+
+    /* Prompt 4: point the privilege-0 stack at the incoming thread's kernel
+     * stack (so a ring 3 -> ring 0 trap lands there) and switch address spaces
+     * only when it actually changes. Both kernel stacks stay mapped under both
+     * CR3s (every user space mirrors the kernel footprint), so loading CR3
+     * before the stack swap is safe. */
+    tss_set_rsp0((uint64_t)(uintptr_t)next->kernel_stack_top);
+    if (thread_cr3(next) != thread_cr3(prev)) {
+        paging_load_cr3(thread_cr3(next));
+    }
+
     context_switch(&prev->rsp, next->rsp);
     /* Execution resumes here when `prev` is scheduled again. */
 }
@@ -103,6 +123,7 @@ void scheduler_init(void) {
     g_preempt_count = 0;
     g_need_resched = 0;
     g_slice = SCHEDULER_TIME_SLICE_TICKS;
+    g_kernel_cr3 = vmm_kernel_pml4();
 
     /* The current (boot) context becomes a throwaway placeholder thread so
      * the first context_switch has somewhere to save the old RSP. */

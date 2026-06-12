@@ -6,7 +6,26 @@ VARS template is found, it is printed on the second line. Exits non-zero with a
 clear message when nothing is found.
 """
 import os
+import shutil
 import sys
+
+
+def _qemu_share_dirs():
+    """Directories that may hold QEMU's bundled edk2 firmware.
+
+    Includes the install's own share/ (derived from the qemu executable) so the
+    Windows winget build (C:\\Program Files\\qemu\\share\\...) is found without
+    hard-coding the path."""
+    dirs = []
+    exe = shutil.which("qemu-system-x86_64") or shutil.which("qemu-system-x86_64.exe")
+    if exe:
+        base = os.path.dirname(os.path.abspath(exe))
+        dirs += [os.path.join(base, "share"), base]
+    dirs += [
+        r"C:\Program Files\qemu\share",
+        r"C:\Program Files\qemu",
+    ]
+    return dirs
 
 # (code, vars-or-None) candidate pairs, in priority order.
 CODE_CANDIDATES = [
@@ -22,7 +41,7 @@ CODE_CANDIDATES = [
     "/usr/share/qemu/OVMF.fd",
     "/usr/share/ovmf/OVMF.fd",
     "/usr/share/OVMF/OVMF.fd",
-]
+] + [os.path.join(d, "edk2-x86_64-code.fd") for d in _qemu_share_dirs()]
 
 VARS_CANDIDATES = [
     os.environ.get("OVMF_VARS"),
@@ -32,7 +51,7 @@ VARS_CANDIDATES = [
     "/usr/share/OVMF/OVMF_VARS_4M.fd",
     "/usr/share/edk2-ovmf/x64/OVMF_VARS.fd",
     "/usr/share/edk2/ovmf/OVMF_VARS.fd",
-]
+] + [os.path.join(d, "edk2-i386-vars.fd") for d in _qemu_share_dirs()]
 
 
 def find_first(candidates):

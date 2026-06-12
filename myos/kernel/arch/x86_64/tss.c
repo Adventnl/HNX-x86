@@ -31,3 +31,7 @@ void tss_init(void) {
     gdt_set_tss((uint64_t)(uintptr_t)&g_tss, sizeof(struct tss) - 1);
     x86_ltr(GDT_TSS);
 }
+
+void tss_set_rsp0(uint64_t rsp0) {
+    g_tss.rsp0 = rsp0;
+}

@@ -3,6 +3,7 @@
 #include "cpu.h"
 #include "log.h"
 #include "panic.h"
+#include "user_fault.h"
 
 static const char *names[32] = {
     "#DE Divide Error",
@@ -73,6 +74,12 @@ void page_fault_dump(struct x86_trap_frame *frame) {
 
 void x86_exception_dispatch(struct x86_trap_frame *frame) {
     x86_cli();
+
+    /* A fault taken in ring 3 (CS.RPL == 3) is isolated to the user task; the
+     * kernel does not panic. Kernel-mode faults keep the fatal path below. */
+    if ((frame->cs & 3) == 3) {
+        user_fault_handle(frame);     /* never returns */
+    }
 
     kernel_log_line("");
     kernel_log_line("==================== CPU EXCEPTION ====================");

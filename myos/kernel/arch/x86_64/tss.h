@@ -28,4 +28,9 @@ struct tss {
 
 void tss_init(void);
 
+/* Update the privilege-0 stack pointer the CPU loads on a ring 3 -> ring 0
+ * transition (int 0x80, IRQ, or fault from user mode). The scheduler calls this
+ * with the incoming thread's kernel stack top on every context switch. */
+void tss_set_rsp0(uint64_t rsp0);
+
 #endif /* MYOS_X86_TSS_H */

@@ -28,6 +28,7 @@ BUILD  := build
 B_BOOT := $(BUILD)/bootloader
 B_KERN := $(BUILD)/kernel
 B_IMG  := $(BUILD)/image
+B_USER := $(BUILD)/user
 
 # ---- Flags -----------------------------------------------------------------
 BOOT_CFLAGS := --target=x86_64-unknown-windows -ffreestanding -fshort-wchar \
@@ -36,7 +37,8 @@ BOOT_CFLAGS := --target=x86_64-unknown-windows -ffreestanding -fshort-wchar \
 BOOT_LDFLAGS := /subsystem:efi_application /entry:EfiMain /nodefaultlib
 
 KERN_INCLUDES := -Ikernel/include -Ikernel/arch/x86_64 -Ikernel/memory \
-                 -Ikernel/sched -Ikernel/tests -Ishared/include
+                 -Ikernel/sched -Ikernel/tests -Ikernel/initramfs \
+                 -Ikernel/user -Ishared/include
 # EXTRA_KCFLAGS is injected by the verify-* targets to enable destructive tests.
 EXTRA_KCFLAGS ?=
 # -mno-sse/-mno-mmx/-msoft-float: IRQ stubs save only the GPRs, so the kernel
@@ -48,6 +50,17 @@ KERN_CFLAGS := --target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protec
 KERN_ASFLAGS := --target=x86_64-unknown-none-elf $(KERN_INCLUDES)
 KERN_LDFLAGS := -T kernel/arch/x86_64/linker.ld
 
+# ---- User-space program flags (ring 3, freestanding, no libc) --------------
+# Shares the kernel's syscall_numbers.h via -Ikernel/user so the ABI never
+# drifts. Linked at USER_IMAGE_BASE with 4 KiB page granularity (ld.lld's
+# x86-64 default is 2 MiB) and converted to HXE1 by tools/mkhxe.py.
+USER_INCLUDES := -Iuser/lib -Ikernel/user
+USER_CFLAGS := --target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protector \
+               -fno-builtin -fno-pic -fno-pie -mno-red-zone -mno-sse -mno-mmx \
+               -msoft-float -nostdlib -Wall -Wextra $(USER_INCLUDES)
+USER_ASFLAGS := --target=x86_64-unknown-none-elf $(USER_INCLUDES)
+USER_LDFLAGS := -T user/linker.ld -z max-page-size=0x1000
+
 # ---- Sources / objects -----------------------------------------------------
 BOOT_SRC := $(wildcard bootloader/src/*.c)
 BOOT_OBJ := $(patsubst bootloader/src/%.c,$(B_BOOT)/%.obj,$(BOOT_SRC))
@@ -57,16 +70,27 @@ BOOT_HDR := $(wildcard bootloader/include/*.h) shared/include/boot_info.h
 # names are flattened into build/kernel/ (basenames are unique across dirs).
 KERN_CSRC := $(wildcard kernel/src/*.c) $(wildcard kernel/arch/x86_64/*.c) \
              $(wildcard kernel/memory/*.c) $(wildcard kernel/sched/*.c) \
-             $(wildcard kernel/tests/*.c)
-KERN_SSRC := $(wildcard kernel/arch/x86_64/*.S) $(wildcard kernel/sched/*.S)
+             $(wildcard kernel/tests/*.c) $(wildcard kernel/initramfs/*.c) \
+             $(wildcard kernel/user/*.c)
+KERN_SSRC := $(wildcard kernel/arch/x86_64/*.S) $(wildcard kernel/sched/*.S) \
+             $(wildcard kernel/user/*.S)
 KERN_OBJ  := $(addprefix $(B_KERN)/,$(notdir $(KERN_CSRC:.c=.o))) \
              $(addprefix $(B_KERN)/,$(notdir $(KERN_SSRC:.S=.o)))
 KERN_HDR  := $(wildcard kernel/include/*.h) $(wildcard kernel/arch/x86_64/*.h) \
              $(wildcard kernel/memory/*.h) $(wildcard kernel/sched/*.h) \
-             $(wildcard kernel/tests/*.h) shared/include/boot_info.h
+             $(wildcard kernel/tests/*.h) $(wildcard kernel/initramfs/*.h) \
+             $(wildcard kernel/user/*.h) shared/include/boot_info.h
 
-vpath %.c kernel/src kernel/arch/x86_64 kernel/memory kernel/sched kernel/tests
-vpath %.S kernel/arch/x86_64 kernel/sched
+vpath %.c kernel/src kernel/arch/x86_64 kernel/memory kernel/sched kernel/tests \
+          kernel/initramfs kernel/user
+vpath %.S kernel/arch/x86_64 kernel/sched kernel/user
+
+# ---- User-space sources / objects ------------------------------------------
+USER_LIB_OBJ := $(B_USER)/syscall.o $(B_USER)/string.o $(B_USER)/stdlib.o
+USER_CRT0    := $(B_USER)/crt0.o
+USER_PROGS   := $(B_USER)/init.hxe $(B_USER)/syscall_test.hxe
+USER_HDR     := $(wildcard user/lib/*.h) kernel/user/syscall_numbers.h
+INITRAMFS    := $(B_IMG)/initramfs.hxf
 
 BOOTX64 := $(B_BOOT)/BOOTX64.EFI
 KERNEL  := $(B_KERN)/kernel.elf
@@ -79,19 +103,21 @@ define need
 endef
 
 # ---- Phony targets ---------------------------------------------------------
-.PHONY: all bootloader kernel image run debug clean dirs \
+.PHONY: all bootloader kernel user initramfs image run debug clean dirs \
         inspect loc run-headless \
         verify-boot verify-exception verify-pagefault verify-qemu-matrix \
         verify-interrupts verify-timer verify-scheduler verify-preemption \
-        verify-prompt3
+        verify-prompt3 verify-user-build verify-initramfs verify-user-mode \
+        verify-syscalls verify-user-fault verify-prompt4
 .DEFAULT_GOAL := all
 
 all: bootloader kernel
 bootloader: dirs $(BOOTX64)
 kernel: dirs $(KERNEL)
+user: dirs $(USER_PROGS)
 
 dirs:
-	@mkdir -p $(B_BOOT) $(B_KERN) $(B_IMG)
+	@mkdir -p $(B_BOOT) $(B_KERN) $(B_IMG) $(B_USER)
 
 # ---- Bootloader (PE/COFF EFI application) ----------------------------------
 $(B_BOOT)/%.obj: bootloader/src/%.c $(BOOT_HDR) | dirs
@@ -117,10 +143,43 @@ $(KERNEL): $(KERN_OBJ)
 	$(LD_KERNEL) $(KERN_LDFLAGS) -o $@ $(KERN_OBJ)
 	@echo "[OK] $@"
 
-# ---- Disk image (stage 6) --------------------------------------------------
-image: all
+# ---- User-space programs (ring 3, HXE1) ------------------------------------
+$(B_USER)/%.o: user/lib/%.c $(USER_HDR) | dirs
+	$(call need,$(CC),Install LLVM/clang. macOS: brew install llvm)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(B_USER)/crt0.o: user/lib/crt0.S $(USER_HDR) | dirs
+	$(call need,$(CC),Install LLVM/clang. macOS: brew install llvm)
+	$(CC) $(USER_ASFLAGS) -c $< -o $@
+
+$(B_USER)/init.o: user/init/init.c $(USER_HDR) | dirs
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(B_USER)/syscall_test.o: user/tests/syscall_test.c $(USER_HDR) | dirs
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+# Link each program (crt0 first), then convert the ELF to HXE1.
+$(B_USER)/%.elf: $(B_USER)/%.o $(USER_CRT0) $(USER_LIB_OBJ)
+	$(call need,$(LD_KERNEL),Install LLVM lld. macOS: brew install lld   (provides ld.lld))
+	$(LD_KERNEL) $(USER_LDFLAGS) -o $@ $(USER_CRT0) $< $(USER_LIB_OBJ)
+
+$(B_USER)/%.hxe: $(B_USER)/%.elf
 	$(call need,$(PY),Install Python 3.)
-	$(PY) tools/build_image.py --bootloader $(BOOTX64) --kernel $(KERNEL) --out $(IMAGE)
+	$(PY) tools/mkhxe.py $< $@
+
+# ---- Initramfs (HXF1 archive) ----------------------------------------------
+initramfs: user
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/mkinitramfs.py --out $(INITRAMFS) \
+	  /bin/init.hxe $(B_USER)/init.hxe \
+	  /bin/syscall_test.hxe $(B_USER)/syscall_test.hxe \
+	  /etc/banner.txt user/init/banner.txt
+
+# ---- Disk image (stage 6 + Prompt 4 initramfs) -----------------------------
+image: all initramfs
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/build_image.py --bootloader $(BOOTX64) --kernel $(KERNEL) \
+	  --initramfs $(INITRAMFS) --out $(IMAGE)
 
 # ---- Run / debug (stage 5) -------------------------------------------------
 run: image
@@ -132,7 +191,7 @@ debug: image
 	$(PY) tools/run_qemu.py --image $(IMAGE) --debug
 
 clean:
-	rm -rf $(B_BOOT)/* $(B_KERN)/* $(B_IMG)/*
+	rm -rf $(B_BOOT)/* $(B_KERN)/* $(B_IMG)/* $(B_USER)/*
 	@echo "[OK] cleaned build/"
 
 # ---- Inspection ------------------------------------------------------------
@@ -170,7 +229,7 @@ verify-boot: image
 	$(call need,$(PY),Install Python 3.)
 	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name boot --timeout 60 \
 	  --log $(B_IMG)/serial.log \
-	  --expect "MyOS Kernel 0.0.3" \
+	  --expect "MyOS Kernel 0.0.4" \
 	  --expect "[OK] Kernel entered" \
 	  --expect "[OK] GDT loaded" \
 	  --expect "[OK] TSS loaded" \
@@ -257,6 +316,71 @@ verify-prompt3:
 	$(MAKE) verify-scheduler
 	$(MAKE) verify-preemption
 	@echo "[OK] verify-prompt3 passed"
+
+# ---- Prompt 4 verification --------------------------------------------------
+# Build artifacts exist (no QEMU needed).
+verify-user-build: user initramfs
+	@test -f $(B_USER)/init.hxe         || { echo "[FAIL] verify-user-build: missing $(B_USER)/init.hxe"; exit 1; }
+	@test -f $(B_USER)/syscall_test.hxe || { echo "[FAIL] verify-user-build: missing $(B_USER)/syscall_test.hxe"; exit 1; }
+	@test -f $(INITRAMFS)               || { echo "[FAIL] verify-user-build: missing $(INITRAMFS)"; exit 1; }
+	@echo "[PASS] verify-user-build (init.hxe, syscall_test.hxe, initramfs.hxf present)"
+
+verify-initramfs: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name initramfs --timeout 60 \
+	  --log $(B_IMG)/initramfs-run.log \
+	  --expect "[OK] Initramfs file loaded" \
+	  --expect "[OK] Initramfs loaded" \
+	  --expect "[OK] Initramfs parsed"
+
+verify-user-mode: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name user-mode --timeout 60 \
+	  --log $(B_IMG)/user-mode.log \
+	  --expect "[OK] Ring 3 entry online" \
+	  --expect "[USER] hello from ring 3" \
+	  --expect "[OK] First user program exited cleanly"
+
+verify-syscalls: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name syscalls --timeout 60 \
+	  --log $(B_IMG)/syscalls.log \
+	  --expect "[USER] write syscall OK" \
+	  --expect "[USER] getpid syscall OK" \
+	  --expect "[USER] yield syscall OK" \
+	  --expect "[USER] sleep syscall OK" \
+	  --expect "[USER] read syscall OK" \
+	  --expect "[USER] exit syscall OK" \
+	  --expect "[OK] User/kernel boundary tests passed"
+
+# Destructive: build a kernel that launches a user program which faults in ring 3.
+verify-user-fault:
+	$(call need,$(PY),Install Python 3.)
+	$(MAKE) clean
+	$(MAKE) image EXTRA_KCFLAGS="-DMYOS_TEST_USER_FAULT=1"
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name user-fault --timeout 60 \
+	  --log $(B_IMG)/user-fault.log \
+	  --expect "[TEST] user fault isolation" \
+	  --expect "[OK] User fault isolated" \
+	  --expect "[OK] User/kernel boundary tests passed"
+	$(MAKE) clean
+	$(MAKE) image
+	@echo "[OK] verify-user-fault complete (normal image restored)"
+
+verify-prompt4:
+	$(MAKE) verify-boot
+	$(MAKE) verify-exception
+	$(MAKE) verify-pagefault
+	$(MAKE) verify-interrupts
+	$(MAKE) verify-timer
+	$(MAKE) verify-scheduler
+	$(MAKE) verify-preemption
+	$(MAKE) verify-user-build
+	$(MAKE) verify-initramfs
+	$(MAKE) verify-user-mode
+	$(MAKE) verify-syscalls
+	$(MAKE) verify-user-fault
+	@echo "[OK] verify-prompt4 passed"
 
 # ---- Memory-size matrix ----------------------------------------------------
 verify-qemu-matrix: image

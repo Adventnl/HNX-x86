@@ -242,7 +242,90 @@ sleep loop), C (8-tick busy spin per round → forced quantum preemption), and a
 checker that validates counters, switch/preempt/wakeup counts and tick
 progress, then prints the `[TEST]`/`[PASS]` protocol.
 
-## Next milestone (after Prompt 3)
-**Prompt 4 — user/kernel boundary:** ring 3 transition, syscall entry, syscall
-table, user address spaces, simple executable format, initramfs, first user
-program, write/exit/read/sleep/getpid/yield syscalls.
+## Prompt 4 — user/kernel boundary (stages 55–80)
+
+| # | Stage | Where | Done |
+|---|-------|-------|------|
+| 55 | Bootloader initramfs loading | `bootloader/src/efi_main.c` | ✅ |
+| 56 | Initramfs archive format + packer | `tools/mkinitramfs.py` (HXF1) | ✅ |
+| 57 | Kernel initramfs parser | `kernel/initramfs/initramfs.{c,h}` | ✅ |
+| 58 | User executable format | `kernel/user/user_loader.h` (HXE1) | ✅ |
+| 59 | User program build system | `Makefile` (`make user`), `tools/mkhxe.py` | ✅ |
+| 60 | User-space runtime layout | `user/lib/*`, `user/linker.ld` | ✅ |
+| 61 | User address space creation | `kernel/user/user_address_space.c` | ✅ |
+| 62 | User page mapping helpers | `user_map_page/range`, `user_copy_to_space` | ✅ |
+| 63 | Ring 3 GDT/TSS validation | `kernel/user/user.c`, `tss_set_rsp0` | ✅ |
+| 64 | User-mode entry path | `kernel/user/user_entry.S` | ✅ |
+| 65 | Syscall vector setup | `kernel/user/syscall.c` (`int 0x80`, DPL 3) | ✅ |
+| 66 | Syscall assembly entry | `kernel/user/syscall_entry.S` | ✅ |
+| 67 | Syscall dispatcher | `kernel/user/syscall.c` (`syscall_dispatch`) | ✅ |
+| 68 | Basic syscall table | `kernel/user/syscall_numbers.h` | ✅ |
+| 69 | write syscall | `sys_write` (fd 1/2, validated copy) | ✅ |
+| 70 | exit syscall | `sys_exit` -> `user_task_exit_current` | ✅ |
+| 71 | yield syscall | `sys_yield` -> `scheduler_yield` | ✅ |
+| 72 | sleep syscall | `sys_sleep` -> `thread_sleep_ms` | ✅ |
+| 73 | getpid syscall | `sys_getpid` (user task id) | ✅ |
+| 74 | read syscall stub | `sys_read` (fd 0 EOF / len 0 -> 0) | ✅ |
+| 75 | User task/thread integration | `kernel/user/user_task.c`, scheduler CR3/RSP0 | ✅ |
+| 76 | User fault handling | `kernel/user/user_fault.c`, `exceptions.c` | ✅ |
+| 77 | First user program | `user/init/init.c` | ✅ |
+| 78 | User syscall tests | `user/tests/syscall_test.c`, `kernel/tests/user_tests.c` | ✅ |
+| 79 | Verification targets | `Makefile` (`verify-user-*`, `verify-prompt4`) | ✅ |
+| 80 | Documentation | `README.md`, `docs/*` | ✅ |
+
+### HXF1 initramfs format
+Custom read-only archive (not tar/cpio/zip): `struct hxf_header` (magic
+`0x31465848`, version, entry_count, header_size) + `struct hxf_entry`
+(`char path[128]`, offset, size, flags) × N + blobs. The bootloader loads
+`\boot\initramfs.hxf` as `EfiLoaderData`; the kernel parses it in place
+(identity-mapped, never freed). Packed by `tools/mkinitramfs.py`.
+
+### HXE1 user executable format
+Custom load format (the kernel does **not** parse ELF in ring 0):
+`struct hxe_header` (magic `0x31455848`, version, entry, segment_count,
+header_size) + `struct hxe_segment` (vaddr, memsz, filesz, file_offset, flags
+R/W/X) × N + segment bytes. `tools/mkhxe.py` flattens a linked user ELF's
+PT_LOAD program headers into HXE1 (file_size ≤ memory_size, addresses below
+`USER_TOP` and ≥ `USER_IMAGE_BASE`, no overlap, entry inside an exec segment).
+
+### User address space layout
+`USER_IMAGE_BASE=0x400000`, `USER_STACK_TOP=0x7FFFFFFFE000`,
+`USER_STACK_SIZE=0x20000`, `USER_TOP=0x800000000000`. Each task's PML4 mirrors
+the kernel low footprint `[0, 4 MiB)`, the framebuffer, and the LAPIC MMIO as
+supervisor pages (so kernel handlers run under any user CR3), plus user image +
+stack as user pages. The image base sits at the 2 MiB boundary above the kernel
+image, so kernel and user pages never overlap. `kfree`/page reclamation in
+`user_address_space_destroy` frees only user-flagged leaves and the per-space
+tables.
+
+### int 0x80 syscall ABI
+`rax`=number; args `rdi, rsi, rdx, r10, r8, r9`; result in `rax`; negative =
+error. Vector `0x80` is a DPL-3 interrupt gate. Invalid number → `-38`
+(`-ENOSYS`); bad user pointer → `-14` (`-EFAULT`); the kernel validates user
+pointers in software and never panics on bad user input.
+
+### read syscall limitation
+There is no console input device in Prompt 4: `read(0, …)` returns `0` (EOF) and
+any `read` with length `0` returns `0`. A real device/TTY-backed read arrives in
+Prompt 5.
+
+### User fault isolation
+`x86_exception_dispatch` routes any fault with `CS.RPL == 3` to
+`user_fault_handle`, which prints a diagnostic, logs `[OK] User fault isolated`,
+marks the task `FAULTED`, and reschedules — the kernel never panics on a user
+fault. CPL-0 faults keep the original fatal path.
+
+### Verification (Prompt 4)
+| Target | Asserts |
+|--------|---------|
+| `make verify-user-build` | `init.hxe`, `syscall_test.hxe`, `initramfs.hxf` exist |
+| `make verify-initramfs` | initramfs file loaded (bootloader) + loaded/parsed (kernel) |
+| `make verify-user-mode` | ring 3 entry online; first user program exits cleanly |
+| `make verify-syscalls` | every `[USER] … OK` marker + `User/kernel boundary tests passed` |
+| `make verify-user-fault` | a deliberate ring-3 #PF is isolated; kernel keeps running |
+| `make verify-prompt4` | all Prompt 3 targets + all of the above |
+
+## Next milestone (after Prompt 4)
+**Prompt 5 — process model and interactive userland:** real process table,
+spawn/exec/wait, file-descriptor model, devfs console, keyboard input, TTY
+layer, init process, shell, and first core utilities.

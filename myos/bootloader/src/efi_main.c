@@ -77,6 +77,18 @@ EFI_STATUS EFIAPI EfiMain(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tabl
     }
     log_ok("ACPI RSDP found");
 
+    /* --- Prompt 4: load \boot\initramfs.hxf into RAM (EfiLoaderData, which the
+     * kernel's PMM never frees and the VMM identity-maps). --- */
+    void *initrd = NULL;
+    UINTN initrd_size = 0;
+    s = bl_load_file((CHAR16 *)L"\\boot\\initramfs.hxf", &initrd, &initrd_size);
+    if (EFI_ERROR(s)) {
+        bl_fail("Initramfs file load", s);
+    }
+    bi->initramfs_base = (myos_u64)(UINTN)initrd;
+    bi->initramfs_size = (myos_u64)initrd_size;
+    log_ok("Initramfs file loaded");
+
     /* --- Stage 12: final memory map (immediately before ExitBootServices) --- */
     UINTN map_key = 0;
     s = bl_capture_memory_map(bi, &map_key);
