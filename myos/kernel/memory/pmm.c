@@ -1,5 +1,10 @@
 /* Physical memory manager: parse the UEFI memory map and manage 4 KiB pages
- * with a bitmap. A set bit means the page is used/reserved. */
+ * with a bitmap. A set bit means the page is used/reserved.
+ *
+ * Allocation policy (conservative): only EfiConventionalMemory is ever freed.
+ * Everything else — reserved, runtime, ACPI, MMIO, boot-services, the low
+ * 1 MiB, the kernel image, boot_info, the UEFI map, and the bitmap itself —
+ * stays reserved. */
 #include "pmm.h"
 #include "memory_layout.h"
 #include "log.h"
@@ -9,8 +14,11 @@ static uint8_t *g_bitmap;       /* identity-mapped physical address */
 static uint64_t g_bitmap_bytes;
 static uint64_t g_total_pages;
 static uint64_t g_free_pages;
+static uint64_t g_reserved_pages;
 static uint64_t g_bitmap_phys;
 static uint64_t g_bitmap_pages;
+static uint64_t g_lowest_page;   /* first allocatable physical address */
+static uint64_t g_highest_addr;  /* highest managed RAM address */
 
 static const struct boot_info *g_bi;
 
@@ -55,7 +63,7 @@ static void reserve_range(uint64_t start, uint64_t size) {
 void pmm_init(const struct boot_info *boot_info) {
     g_bi = boot_info;
 
-    /* 1. Highest physical address present in the map -> bitmap size. */
+    /* 1. Highest physical RAM address -> bitmap size (MMIO/reserved excluded). */
     uint64_t highest = 0;
     uint64_t n = desc_count();
     for (uint64_t i = 0; i < n; i++) {
@@ -68,18 +76,20 @@ void pmm_init(const struct boot_info *boot_info) {
             highest = end;
         }
     }
+    g_highest_addr = highest;
     g_total_pages  = highest >> PAGE_SHIFT;
     g_bitmap_bytes = (g_total_pages + 7) / 8;
     g_bitmap_pages = PAGE_ALIGN_UP(g_bitmap_bytes) >> PAGE_SHIFT;
 
-    /* 2. Find a conventional region large enough to hold the bitmap. */
+    /* 2. Find a conventional region (at/above 1 MiB) to hold the bitmap. */
     g_bitmap_phys = 0;
     for (uint64_t i = 0; i < n; i++) {
         const struct efi_memory_descriptor_kernel *d = desc_at(i);
         if (d->type != EFI_CONVENTIONAL_MEMORY) {
             continue;
         }
-        if (d->number_of_pages >= g_bitmap_pages && d->physical_start >= PAGE_SIZE) {
+        if (d->number_of_pages >= g_bitmap_pages &&
+            d->physical_start >= LOW_MEMORY_RESERVED_END) {
             g_bitmap_phys = d->physical_start;
             break;
         }
@@ -95,11 +105,11 @@ void pmm_init(const struct boot_info *boot_info) {
     }
     g_free_pages = 0;
 
-    /* 4. Free conventional memory. */
+    /* 4. Free conventional memory only. */
     for (uint64_t i = 0; i < n; i++) {
         const struct efi_memory_descriptor_kernel *d = desc_at(i);
         if (d->type != EFI_CONVENTIONAL_MEMORY) {
-            continue;   /* fb/ACPI/runtime/etc. stay reserved */
+            continue;   /* reserved/runtime/ACPI/MMIO/boot-services stay used */
         }
         uint64_t first = d->physical_start >> PAGE_SHIFT;
         uint64_t last  = first + d->number_of_pages;
@@ -112,19 +122,33 @@ void pmm_init(const struct boot_info *boot_info) {
     }
 
     /* 5. Re-reserve the things that must never be handed out. */
-    reserve_range(0, PAGE_SIZE);                                     /* page 0 */
+    reserve_range(0, LOW_MEMORY_RESERVED_END);                       /* low 1 MiB */
     reserve_range(boot_info->kernel.kernel_base,
                   boot_info->kernel.kernel_size);                    /* kernel image */
     reserve_range((uint64_t)(uintptr_t)boot_info, sizeof(struct boot_info)); /* boot_info */
     reserve_range(boot_info->memory_map.map_base,
                   boot_info->memory_map.map_size);                   /* UEFI map */
+    reserve_range(boot_info->framebuffer.base,
+                  boot_info->framebuffer.size);                      /* framebuffer */
     reserve_range(g_bitmap_phys, g_bitmap_pages * PAGE_SIZE);        /* the bitmap itself */
-    /* Framebuffer, ACPI, and UEFI runtime ranges are non-conventional and were
+    /* ACPI reclaim/NVS and UEFI runtime ranges are non-conventional and were
      * never freed in step 4, so they remain reserved automatically. */
+
+    g_reserved_pages = g_total_pages - g_free_pages;
+
+    /* 6. Record the lowest allocatable page for diagnostics. */
+    g_lowest_page = 0;
+    for (uint64_t p = LOW_MEMORY_RESERVED_END >> PAGE_SHIFT; p < g_total_pages; p++) {
+        if (!bit_test(p)) {
+            g_lowest_page = p << PAGE_SHIFT;
+            break;
+        }
+    }
 }
 
 uint64_t pmm_alloc_page(void) {
-    for (uint64_t p = 1; p < g_total_pages; p++) {   /* never page 0 */
+    uint64_t start = LOW_MEMORY_RESERVED_END >> PAGE_SHIFT;   /* never below 1 MiB */
+    for (uint64_t p = start; p < g_total_pages; p++) {
         if (!bit_test(p)) {
             bit_set(p);
             g_free_pages--;
@@ -138,6 +162,9 @@ void pmm_free_page(uint64_t physical_address) {
     if (physical_address == 0 || (physical_address & PAGE_MASK)) {
         kernel_panic_hex("pmm: invalid free", physical_address);
     }
+    if (physical_address < LOW_MEMORY_RESERVED_END) {
+        kernel_panic_hex("pmm: free of reserved low memory", physical_address);
+    }
     uint64_t page = physical_address >> PAGE_SHIFT;
     if (page >= g_total_pages) {
         kernel_panic_hex("pmm: free out of range", physical_address);
@@ -149,13 +176,60 @@ void pmm_free_page(uint64_t physical_address) {
     g_free_pages++;
 }
 
-uint64_t pmm_total_pages(void) { return g_total_pages; }
-uint64_t pmm_free_pages(void)  { return g_free_pages; }
-uint64_t pmm_used_pages(void)  { return g_total_pages - g_free_pages; }
+uint64_t pmm_total_pages(void)    { return g_total_pages; }
+uint64_t pmm_free_pages(void)     { return g_free_pages; }
+uint64_t pmm_used_pages(void)     { return g_total_pages - g_free_pages; }
+uint64_t pmm_reserved_pages(void) { return g_reserved_pages; }
+uint64_t pmm_bitmap_base(void)    { return g_bitmap_phys; }
+uint64_t pmm_bitmap_size(void)    { return g_bitmap_bytes; }
+uint64_t pmm_lowest_page(void)    { return g_lowest_page; }
+uint64_t pmm_highest_address(void){ return g_highest_addr; }
 
 void pmm_dump_stats(void) {
-    kernel_log_hex64("    total pages : ", g_total_pages);
-    kernel_log_hex64("    free  pages : ", g_free_pages);
-    kernel_log_hex64("    used  pages : ", pmm_used_pages());
-    kernel_log_hex64("    bitmap phys : ", g_bitmap_phys);
+    kernel_log_hex64("    total pages    : ", g_total_pages);
+    kernel_log_hex64("    free  pages    : ", g_free_pages);
+    kernel_log_hex64("    used  pages    : ", pmm_used_pages());
+    kernel_log_hex64("    reserved pages : ", g_reserved_pages);
+    kernel_log_hex64("    bitmap phys    : ", g_bitmap_phys);
+    kernel_log_hex64("    bitmap bytes   : ", g_bitmap_bytes);
+    kernel_log_hex64("    lowest alloc   : ", g_lowest_page);
+    kernel_log_hex64("    highest RAM    : ", g_highest_addr);
+}
+
+int pmm_stress_test(int verbose) {
+    enum { N = 64 };
+    uint64_t pages[N];
+    uint64_t before = pmm_free_pages();
+
+    for (int i = 0; i < N; i++) {
+        pages[i] = pmm_alloc_page();
+        if (pages[i] == PMM_INVALID_PAGE) {
+            return 0;                       /* allocation failed */
+        }
+        if (pages[i] & PAGE_MASK) {
+            return 0;                       /* not 4 KiB aligned */
+        }
+        if (pages[i] < LOW_MEMORY_RESERVED_END) {
+            return 0;                       /* below the 1 MiB floor */
+        }
+        for (int j = 0; j < i; j++) {
+            if (pages[j] == pages[i]) {
+                return 0;                   /* duplicate */
+            }
+        }
+        if (verbose) {
+            kernel_log_hex64("      alloc page : ", pages[i]);
+        }
+    }
+
+    if (pmm_free_pages() != before - N) {
+        return 0;
+    }
+    for (int i = 0; i < N; i++) {
+        pmm_free_page(pages[i]);
+    }
+    if (pmm_free_pages() != before) {
+        return 0;                           /* free count not restored */
+    }
+    return 1;
 }

@@ -25,6 +25,30 @@ make debug       # same as run but halted with a gdb stub on :1234
 make clean       # remove build artifacts
 ```
 
+## Verification & inspection (Prompt 2.5)
+```bash
+make inspect            # file/ELF header/program headers/symbols of the binaries
+make loc                # source line counts by category (excludes build/)
+make run-headless       # run with no window; serial still on stdio
+make verify-boot        # headless boot; assert the full boot log on serial
+make verify-exception   # build with -DMYOS_TEST_INVALID_OPCODE; assert #UD dump
+make verify-pagefault   # build with -DMYOS_TEST_PAGE_FAULT; assert #PF dump
+make verify-qemu-matrix # boot-verify across 128M/256M/512M/1024M/2048M
+```
+The `verify-*` targets use `tools/verify_qemu.py`, which runs QEMU headless,
+captures COM1 serial to `build/image/<name>.log`, and prints `[PASS]`/`[FAIL]`.
+No GUI is required. `verify-exception`/`verify-pagefault` build a *separate*
+destructive test kernel and restore the normal image afterwards — destructive
+tests are never present in a normal `make all` / `make image`.
+
+### Destructive test flags (compile-time, opt-in only)
+```
+MYOS_TEST_INVALID_OPCODE   ud2 after init   -> #UD
+MYOS_TEST_PAGE_FAULT       read unmapped VA -> #PF
+MYOS_TEST_PMM_STRESS       extended PMM stress in early tests
+MYOS_TEST_VERBOSE          extra diagnostic logging
+```
+
 ## Compiler flags
 **Bootloader** (`--target=x86_64-unknown-windows`):
 `-ffreestanding -fshort-wchar -mno-red-zone -fno-stack-protector -fno-builtin

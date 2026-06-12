@@ -57,6 +57,15 @@ void     pmm_free_page(uint64_t physical_address);
 uint64_t pmm_total_pages(void);
 uint64_t pmm_free_pages(void);
 uint64_t pmm_used_pages(void);
+uint64_t pmm_reserved_pages(void);     /* pages reserved at init (never freed)  */
+uint64_t pmm_bitmap_base(void);        /* physical address of the bitmap        */
+uint64_t pmm_bitmap_size(void);        /* bitmap size in bytes                  */
+uint64_t pmm_lowest_page(void);        /* lowest allocatable physical address   */
+uint64_t pmm_highest_address(void);    /* highest managed RAM address           */
 void     pmm_dump_stats(void);
+
+/* Stress test: allocate 64 pages, verify alignment/uniqueness, free them, and
+ * confirm the free count is restored. Returns 1 on success, 0 on failure. */
+int      pmm_stress_test(int verbose);
 
 #endif /* MYOS_PMM_H */

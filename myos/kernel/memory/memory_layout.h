@@ -15,6 +15,11 @@
 /* Physical link/load address of the kernel image (matches linker.ld). */
 #define KERNEL_PHYSICAL_BASE 0x100000ULL
 
+/* All physical memory below 1 MiB is reserved (real-mode IVT/BDA, EBDA, video
+ * memory, option ROMs, the legacy BIOS area, SMP trampoline space, etc.) and
+ * is never handed out by the page allocator. */
+#define LOW_MEMORY_RESERVED_END 0x100000ULL
+
 /* Virtual layout (canonical x86-64 higher half). */
 #define KERNEL_HIGHER_HALF_BASE 0xFFFFFFFF80000000ULL
 #define KERNEL_DIRECT_MAP_BASE  0xFFFF800000000000ULL

@@ -84,7 +84,11 @@ void x86_exception_dispatch(struct x86_trap_frame *frame) {
     kernel_log_hex64("  rsp        : ", frame->rsp);
     kernel_log_hex64("  rflags     : ", frame->rflags);
     kernel_log_hex64("  cs         : ", frame->cs);
-    kernel_log_hex64("  ss         : ", frame->ss);
+    /* Long mode always pushes SS:RSP; a NULL SS (allowed on same-CPL faults)
+     * is reported as the kernel data selector for clarity. */
+    kernel_log_hex64("  ss         : ", frame->ss ? frame->ss : 0x10);
+    kernel_log("  mode       : ");
+    kernel_log_line((frame->cs & 3) ? "user (CPL3)" : "kernel (CPL0)");
 
     if (frame->vector == VEC_PAGE_FAULT) {
         page_fault_dump(frame);

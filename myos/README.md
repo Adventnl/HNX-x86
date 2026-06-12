@@ -46,13 +46,34 @@ Implemented:
   handlers, page-fault diagnostics, bitmap physical memory manager, kernel page
   tables with a **loaded custom CR3**, an early kernel heap, and an early
   self-test framework. Boots to `MyOS Kernel 0.0.2`.
+- **Prompt 2.5 (hardening/verification):** repo cleanup + `.gitignore`,
+  headless verification targets, audited ISR trap frame, low-1 MiB PMM
+  reservation + diagnostics + stress test, CR3 read-back/mapping validation,
+  pixel-format-aware framebuffer packing, and opt-in destructive test flags.
 
-See [docs/checkpoints.md](docs/checkpoints.md) for the per-stage table, PMM/VMM
-design, and the CR3 decision.
+### What is tested how
+- **Tested by normal boot** (`make verify-boot`): bootloader, serial, logging,
+  GDT/TSS/IDT, PMM, VMM/CR3, heap, early self-tests.
+- **Tested by destructive verification targets:** CPU exceptions
+  (`make verify-exception`, #UD) and page faults (`make verify-pagefault`, #PF).
+- **Tested across RAM sizes:** `make verify-qemu-matrix` (128M–2048M).
+- **Not yet implemented:** interrupts/IRQs, timer, scheduler, threads, user
+  mode, syscalls, drivers, FS, network, GUI, SMP.
+- **Intentionally deferred:** `kfree` reclamation (bump allocator no-op),
+  direct-map population, BootServices memory reclaim.
 
-Not implemented (by design): timer preemption, APIC timer, scheduler, kernel
-threads, user mode, syscalls, processes, VFS, initramfs, filesystems, PCI, USB,
-networking, GUI, SMP.
+See [docs/checkpoints.md](docs/checkpoints.md) for the full per-stage table,
+PMM/VMM design, and verification status.
+
+## Why the repository is still small
+This is an early boot + kernel-foundation project, by design:
+- It contains a UEFI bootloader and a minimal kernel only — **no** drivers,
+  userland, GUI, filesystem, or network stack yet.
+- The kernel's large `.bss` (stacks + 2 MiB heap arena) is `NOBITS`: it costs
+  zero bytes in the ELF file and is only reserved in RAM at load time, so the
+  on-disk kernel stays tiny.
+- Every claimed capability is backed by a `make verify-*` target rather than
+  prose. Small and verified beats large and fake.
 
 Next milestone: **Prompt 3 — interrupt controller and scheduler foundation**
 (PIC disable hardening, Local APIC, timer source, IRQ routing, kernel threads,

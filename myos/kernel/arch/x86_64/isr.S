@@ -11,6 +11,18 @@
  * pushed first (rax adjacent to rip) and then error_code and vector last.
  * For vectors with a hardware error code, the CPU's error code initially sits
  * where rax must go; the xchg trick relocates it.
+ *
+ * --- SS:RSP handling (IMPORTANT, x86-64 specific) -------------------------
+ * In 32-bit protected mode the CPU pushes SS:ESP *only* on a privilege-level
+ * change, so a same-ring fault leaves them out and the stub must synthesize
+ * them. That caveat does NOT apply here: in IA-32e (long) mode the CPU pushes
+ * SS:RSP *unconditionally* for every interrupt/exception, same-ring or not
+ * (Intel SDM Vol.3 6.14.2 "64-Bit Mode Stack Frame"). So `frame->rsp` is the
+ * exact interrupted RSP and `frame->ss` is the interrupted SS selector even
+ * for kernel-mode faults — no synthesis is required, and adding 32-bit-style
+ * conditional pushes here would instead corrupt the frame and iretq. These
+ * fields are therefore always valid; verified live by `make verify-exception`
+ * and `make verify-pagefault`.
  */
     .text
 

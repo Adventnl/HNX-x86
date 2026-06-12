@@ -1,4 +1,4 @@
-/* MyOS kernel entry: CPU + memory foundation bring-up (Prompt 2). */
+/* MyOS kernel entry: CPU + memory foundation bring-up (Prompt 2 / 2.5). */
 #include "kernel.h"
 #include "framebuffer_console.h"
 #include "log.h"
@@ -20,8 +20,29 @@ const struct boot_info *kernel_boot_info(void) {
     return g_boot_info;
 }
 
+/* Destructive verification hooks. These are compiled in only when the matching
+ * MYOS_TEST_* macro is defined (via `make verify-exception` / `verify-pagefault`)
+ * and never in a normal build. They run after the IDT/exceptions and the kernel
+ * address space are live. */
+static void run_destructive_tests(void) {
+#if defined(MYOS_TEST_INVALID_OPCODE)
+    kernel_log_line("[TEST-MODE] triggering invalid opcode (#UD)");
+    __asm__ volatile("ud2");
+    kernel_panic("ud2 did not fault");
+#elif defined(MYOS_TEST_PAGE_FAULT)
+    kernel_log_line("[TEST-MODE] triggering page fault (#PF)");
+    volatile uint64_t *bad = (volatile uint64_t *)0xFFFFA00000000000ULL;
+    uint64_t value = *bad;
+    (void)value;
+    kernel_panic("page fault did not fault");
+#endif
+}
+
 void kernel_main(struct boot_info *bi) {
-    /* --- Validate boot_info enough to trust the framebuffer --- */
+    /* Bring up COM1 first so the entire boot log is captured on serial. */
+    serial_init();
+
+    /* Validate boot_info enough to trust the framebuffer. */
     if (bi == NULL) {
         kernel_halt_forever();
     }
@@ -39,9 +60,11 @@ void kernel_main(struct boot_info *bi) {
     kernel_log_ok("Kernel entered");
     kernel_log_ok("Boot info magic valid");
     kernel_log_ok("Framebuffer console online");
+    if (fbcon_format_fallback()) {
+        kernel_log_warn("framebuffer pixel format fallback");
+    }
 
-    /* --- Serial + logger --- */
-    serial_init();
+    /* --- Serial + logger (serial hardware already initialized above) --- */
     kernel_log_ok("Serial online");
     kernel_log_init();
     kernel_log_ok("Kernel logger online");
@@ -78,12 +101,20 @@ void kernel_main(struct boot_info *bi) {
         kernel_log_warn("Custom CR3 built but not loaded");
     }
     kernel_log_hex64("    cr3 = ", x86_read_cr3());
+
+    if (!vmm_validate_required_mappings(bi)) {
+        kernel_panic("VMM required mappings invalid");
+    }
+    kernel_log_ok("VMM required mappings validated");
     kernel_log_ok("Page fault handler online");
 
     /* --- Heap --- */
     heap_init();
     kernel_log_ok("Kernel heap online");
     heap_dump_stats();
+
+    /* --- Destructive verification hooks (test builds only) --- */
+    run_destructive_tests();
 
     /* --- Early self-tests --- */
     early_tests_run();

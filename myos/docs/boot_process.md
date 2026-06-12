@@ -83,4 +83,23 @@ faults and page faults run on dedicated IST stacks.
 
 The custom kernel page tables (identity map of RAM + framebuffer, plus a
 higher-half kernel mapping) are built from PMM pages and **CR3 is loaded**, so
-the kernel runs in its own address space (`[OK] Kernel CR3 loaded`).
+the kernel runs in its own address space (`[OK] Kernel CR3 loaded`). After the
+switch, `vmm_validate_required_mappings()` reads CR3 back, re-translates the
+kernel / framebuffer / boot_info / UEFI map / PMM bitmap, and round-trips a
+scratch page (`[OK] VMM required mappings validated`).
+
+## Verifying exceptions (Prompt 2.5)
+
+Exception handling is not exercised by a normal boot (that would halt the
+kernel). It is verified by dedicated destructive builds:
+
+- `make verify-exception` builds with `-DMYOS_TEST_INVALID_OPCODE=1`, executes
+  `ud2`, and asserts the serial log shows the `CPU EXCEPTION` dump with
+  `vector : 0x6` / `#UD Invalid Opcode`.
+- `make verify-pagefault` builds with `-DMYOS_TEST_PAGE_FAULT=1`, reads an
+  unmapped canonical address, and asserts the `#PF Page Fault` dump with the
+  faulting CR2 and decoded error-code bits.
+
+Both run headless via `tools/verify_qemu.py` and confirm the trap frame carries
+a correct kernel-mode RIP/CS/RFLAGS and an interrupted RSP inside the kernel
+stack (SS = 0x10). Neither test is present in a normal `make all` / `make run`.

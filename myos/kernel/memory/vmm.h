@@ -21,4 +21,9 @@ int      vmm_map_page(uint64_t virtual_address, uint64_t physical_address, uint6
 int      vmm_unmap_page(uint64_t virtual_address);
 uint64_t vmm_get_physical(uint64_t virtual_address);
 
+/* Post-CR3 sanity check: read back CR3, confirm every required region is
+ * mapped (and identity-correct), and round-trip a scratch page. Returns 1 on
+ * success, 0 on failure. */
+int      vmm_validate_required_mappings(const struct boot_info *boot_info);
+
 #endif /* MYOS_VMM_H */

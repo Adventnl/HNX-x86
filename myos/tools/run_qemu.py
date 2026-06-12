@@ -63,6 +63,7 @@ def main():
         "-serial", "stdio",
         "-net", "none",
         "-no-reboot",
+        "-no-shutdown",
         "-d", "guest_errors",
         "-D", qemu_log,
     ]

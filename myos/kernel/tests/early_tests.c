@@ -86,12 +86,27 @@ static void test_pmm(void) {
     uint64_t p1 = pmm_alloc_page();
     CHECK(p1 != PMM_INVALID_PAGE, n);
     CHECK((p1 & PAGE_MASK) == 0, n);
+    CHECK(p1 >= LOW_MEMORY_RESERVED_END, n);     /* never below 1 MiB */
     CHECK(pmm_free_pages() == before - 1, n);
     uint64_t p2 = pmm_alloc_page();
     CHECK(p2 != PMM_INVALID_PAGE && p2 != p1, n);
     pmm_free_page(p1);
     pmm_free_page(p2);
     CHECK(pmm_free_pages() == before, n);
+
+    /* 64-page stress: nonzero, aligned, unique, free count restored. */
+    int verbose = 0;
+    int iters = 1;
+#ifdef MYOS_TEST_VERBOSE
+    verbose = 1;
+#endif
+#ifdef MYOS_TEST_PMM_STRESS
+    iters = 8;
+    kernel_log_line("    (extended PMM stress: 8 x 64 pages)");
+#endif
+    for (int i = 0; i < iters; i++) {
+        CHECK(pmm_stress_test(verbose), n);
+    }
     pass(n);
 }
 

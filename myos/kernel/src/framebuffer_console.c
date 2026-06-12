@@ -108,11 +108,26 @@ static const u8 font8x8[96][8] = {
 
 static struct boot_framebuffer g_fb;
 static volatile u8 *g_base;
-static u32 g_fg = 0x00FFFFFF;   /* white */
-static u32 g_bg = 0x00000000;   /* black */
+static u32 g_fg;                /* packed foreground */
+static u32 g_bg;                /* packed background */
 static u32 g_cx;                /* cursor x in pixels */
 static u32 g_cy;                /* cursor y in pixels */
 static bool g_ready;
+
+/* Per-channel left-shift derived from the UEFI pixel masks. */
+static u32 g_r_shift, g_g_shift, g_b_shift;
+static bool g_format_fallback;  /* true => assume direct 0x00RRGGBB */
+
+static u32 mask_shift(u32 mask) {
+    if (mask == 0) {
+        return 0;
+    }
+    u32 s = 0;
+    while (((mask >> s) & 1u) == 0 && s < 31) {
+        s++;
+    }
+    return s;
+}
 
 void fbcon_init(const struct boot_framebuffer *fb) {
     g_fb = *fb;
@@ -120,15 +135,42 @@ void fbcon_init(const struct boot_framebuffer *fb) {
     g_cx = 0;
     g_cy = 0;
     g_ready = (fb->base != 0 && fb->width != 0 && fb->height != 0);
+
+    /* Derive channel shifts from the masks the bootloader read from GOP.
+     * Supports PixelRedGreenBlue / PixelBlueGreenRed / PixelBitMask. Anything
+     * without sane 32-bpp masks falls back to direct 0x00RRGGBB. */
+    g_format_fallback = (fb->bits_per_pixel != 32) ||
+                        (fb->red_mask == 0 && fb->green_mask == 0 && fb->blue_mask == 0);
+    if (g_format_fallback) {
+        g_r_shift = 16;
+        g_g_shift = 8;
+        g_b_shift = 0;
+    } else {
+        g_r_shift = mask_shift(fb->red_mask);
+        g_g_shift = mask_shift(fb->green_mask);
+        g_b_shift = mask_shift(fb->blue_mask);
+    }
+
+    g_fg = fbcon_pack_color(0xFF, 0xFF, 0xFF);   /* white */
+    g_bg = fbcon_pack_color(0x00, 0x00, 0x00);   /* black */
 }
 
 bool fbcon_ready(void) {
     return g_ready;
 }
 
+bool fbcon_format_fallback(void) {
+    return g_format_fallback;
+}
+
+u32 fbcon_pack_color(u8 r, u8 g, u8 b) {
+    return ((u32)r << g_r_shift) | ((u32)g << g_g_shift) | ((u32)b << g_b_shift);
+}
+
 void fbcon_set_color(u32 fg, u32 bg) {
-    g_fg = fg;
-    g_bg = bg;
+    /* Interpret arguments as 0x00RRGGBB and repack for the actual format. */
+    g_fg = fbcon_pack_color((fg >> 16) & 0xFF, (fg >> 8) & 0xFF, fg & 0xFF);
+    g_bg = fbcon_pack_color((bg >> 16) & 0xFF, (bg >> 8) & 0xFF, bg & 0xFF);
 }
 
 void fbcon_putpixel(u32 x, u32 y, u32 color) {
@@ -143,10 +185,12 @@ void fbcon_clear(u32 color) {
     if (!g_ready) {
         return;
     }
+    /* `color` is 0x00RRGGBB; pack it for the actual pixel format. */
+    u32 packed = fbcon_pack_color((color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF);
     for (u32 y = 0; y < g_fb.height; y++) {
         volatile u32 *row = (volatile u32 *)(g_base + (usize)y * g_fb.pitch);
         for (u32 x = 0; x < g_fb.width; x++) {
-            row[x] = color;
+            row[x] = packed;
         }
     }
     g_cx = 0;

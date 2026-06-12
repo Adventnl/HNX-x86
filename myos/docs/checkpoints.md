@@ -103,7 +103,53 @@ MyOS Kernel 0.0.2
 [OK] Early kernel tests passed
 ```
 
-## Next milestone (after Prompt 2)
+## Prompt 2.5 — hardening, verification, cleanup
+
+Correction/validation pass (no new subsystems). Changes:
+
+- **Repo hygiene:** root `.gitignore`; all `build/` artifacts and
+  `tools/__pycache__/` untracked (only `.gitkeep` remains tracked).
+- **Verification targets:** `make inspect`, `make loc`, `make run-headless`,
+  `make verify-boot`, `make verify-exception`, `make verify-pagefault`,
+  `make verify-qemu-matrix`, backed by `tools/verify_qemu.py` (headless serial
+  capture, no GUI required).
+- **ISR trap frame audited:** in x86-64 long mode the CPU pushes SS:RSP
+  *unconditionally* (unlike 32-bit, which only pushes on a CPL change), so the
+  frame already carries the correct interrupted RSP/SS for kernel-mode faults.
+  Confirmed live: `make verify-exception` (#UD) and `make verify-pagefault`
+  (#PF) show `cs=0x08`, `ss=0x10`, and an `rsp` inside the kernel stack. The
+  dispatcher also reports CPL/mode and normalizes a NULL SS for display.
+- **PMM hardened:** reserves all memory below 1 MiB
+  (`LOW_MEMORY_RESERVED_END`), never allocates below it, extra diagnostics
+  (reserved pages, bitmap base/size, lowest allocatable, highest RAM), and a
+  64-page stress test (alignment / uniqueness / free-count restoration).
+- **VMM/CR3 validated:** after loading CR3, `vmm_validate_required_mappings()`
+  reads CR3 back, confirms it equals the kernel PML4, translates kernel /
+  framebuffer / boot_info / UEFI map / PMM bitmap, and round-trips a scratch
+  page. Boot prints `[OK] VMM required mappings validated`.
+- **Framebuffer pixel format:** `fbcon_pack_color()` derives channel shifts
+  from the GOP masks (RGB / BGR / BitMask); unrecognized formats warn
+  `[WARN] framebuffer pixel format fallback`.
+- **Destructive test flags:** `MYOS_TEST_INVALID_OPCODE`, `MYOS_TEST_PAGE_FAULT`,
+  `MYOS_TEST_PMM_STRESS`, `MYOS_TEST_VERBOSE` — never enabled in a normal build.
+
+### Verification status
+
+| Capability | Status |
+|------------|--------|
+| Boot → ExitBootServices → kernel framebuffer | implemented, tested by normal boot (`make verify-boot`) |
+| Serial COM1 + logging router | implemented, tested by normal boot |
+| GDT / TSS / IDT install | implemented, tested by normal boot (sgdt/sidt checks) |
+| CPU exception dispatch (#UD) | implemented, tested by `make verify-exception` |
+| Page-fault handler + CR2 decode | implemented, tested by `make verify-pagefault` |
+| PMM bitmap alloc/free + stress | implemented, tested by normal boot + matrix |
+| VMM kernel page tables + CR3 | implemented & **loaded**, validated by normal boot |
+| Multi-RAM-size boot | tested by `make verify-qemu-matrix` (128M–2048M) |
+| Heap (bump allocator, `kfree` no-op) | implemented, tested by normal boot |
+| Interrupts/timer/scheduler/userland | **not yet implemented** (Prompt 3+) |
+| `kfree` reclamation, slab/free-list | **intentionally deferred** |
+
+## Next milestone (after Prompt 2.5)
 **Prompt 3 — interrupt controller and scheduler foundation:** PIC disable
 hardening, Local APIC discovery/init, timer source, IRQ routing, kernel
 threads, context switching, round-robin scheduler, sleep/wakeup, timer
