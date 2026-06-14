@@ -1,43 +1,43 @@
-/* User-side syscall conformance test (Prompt 4). Exits 0 only if every check
- * passes; the kernel supervisor captures the exit code. */
+/* syscall_test: validate the basic syscall return paths and error handling.
+ * Prints "[PASS] syscall_test" on success (the marker verify-syscalls greps). */
+#include "stdio.h"
+#include "unistd.h"
 #include "syscall.h"
-#include "stdlib.h"
 
-static int failures = 0;
+static int failures;
 
 static void check(int cond, const char *name) {
-    print(cond ? "[PASS] " : "[FAIL] ");
-    print(name);
-    print("\n");
     if (!cond) {
         failures++;
+        printf("[FAIL] %s\n", name);
     }
 }
 
 int main(void) {
-    print("[TEST] syscall_test start\n");
+    print("[test] syscall_test start\n");
 
-    /* Invalid syscall number -> -ENOSYS (no panic). */
-    check(usys(0xBEEF, 0, 0, 0) == -SYS_ENOSYS, "invalid syscall returns error");
+    /* invalid syscall number -> -ENOSYS (no panic). */
+    check(__syscall(0xBEEF, 0, 0, 0) == -SYS_ENOSYS, "invalid syscall -> -ENOSYS");
 
-    /* Bad write pointer (unmapped user address) -> negative error. */
-    check(sys_write(1, (const void *)0x1000, 16) < 0, "bad write pointer returns error");
+    /* bad user pointer to write -> negative error. */
+    check(write(1, (const void *)0x1000, 16) < 0, "bad write pointer rejected");
 
-    /* read with length 0 -> 0. */
-    char buf[8];
-    check(sys_read(0, buf, 0) == 0, "read length 0 returns 0");
+    /* getpid is positive and stable. */
+    long p1 = getpid(), p2 = getpid();
+    check(p1 > 0 && p1 == p2, "getpid positive + stable");
 
-    /* getpid is stable and non-negative. */
-    long p1 = sys_getpid();
-    long p2 = sys_getpid();
-    check(p1 >= 0 && p1 == p2, "getpid stable");
+    /* yield and sleep return 0. */
+    check(yield() == 0, "yield returns 0");
+    check(sleep_ms(5) == 0, "sleep returns 0");
 
-    /* yield and sleep return success. */
-    check(sys_yield() == 0, "yield returns");
-    check(sys_sleep(10) == 0, "sleep returns after ticks advanced");
+    /* read length 0 returns 0. */
+    char b[4];
+    check(read(0, b, 0) == 0, "read len 0 returns 0");
 
     if (failures == 0) {
-        print("[USER] syscall_test all checks passed\n");
+        print("[PASS] syscall_test\n");
+        return 0;
     }
-    return failures == 0 ? 0 : 1;   /* exit code captured by the supervisor */
+    print("[FAIL] syscall_test\n");
+    return 1;
 }

@@ -140,64 +140,79 @@ Interrupts are first enabled not in `kernel_main` but inside the first
 scheduled thread (`thread_trampoline` does `sti`), so no tick can arrive
 before the scheduler is fully live.
 
-## User/kernel boundary (Prompt 4)
+## Userland foundation (Prompt 4)
 
 After the scheduler is initialized (but before `scheduler_start`), `kernel_main`
-(now `MyOS Kernel 0.0.4`) wires up the user/kernel boundary:
+(`MyOS Kernel 0.0.4`) wires up the entire userland foundation:
 
 ```
-initramfs_init(base, size)     validate HXF1 header + entry table  -> [OK] Initramfs loaded/parsed
-initramfs_dump()               list /bin/init.hxe, /bin/syscall_test.hxe, /etc/banner.txt
-syscall_init()                 install int 0x80 (DPL 3) -> [OK] Syscall vector/dispatcher online
-user_init()                    validate ring-3 selectors -> [OK] Ring 3 segments validated / entry online
-scheduler_tests_start()        Prompt 3 self-tests still run
-user_tests_start()             supervisor thread launches the user programs
+[OK] Prompt 3 baseline verification passed
+initramfs_init(base, size)     validate HXF1 -> [OK] Initramfs loaded/parsed
+vfs_init()                     mount table -> [OK] VFS online
+device_init()                  register null/zero
+console_init()                 register /dev/console -> [OK] /dev/console online
+tty_init()                     scripted input buffer -> [OK] TTY layer online
+ramfs_create_from_initramfs()  build tree from HXF1, mount at "/"
+devfs_create()                 mount at "/dev" -> [OK] devfs online
+                               -> [OK] File descriptor tables online
+process_system_init()          process table -> [OK] Process table online
+syscall_init()                 int 0x80 (DPL 3) -> [OK] Syscall vector/dispatcher online
+user_init()                    ring-3 selectors -> [OK] Ring 3 entry online
+                               -> [OK] User executable loader online
+syscall/vfs/process_tests_run  kernel-side unit checks ([PASS] kernel …)
+tty_push_line(...)             pre-load the scripted shell session
+scheduler_tests_start()        Prompt 3 self-tests still run alongside
+user_tests_start()             supervisor spawns /bin/init.hxe (PID 1)
 scheduler_start()              hand off to the scheduler
 ```
 
-### Ring-3 entry
+### Address spaces and the CR3 discipline
 
-Each user task gets a private address space (`user_address_space_create`): a
-fresh PML4 that identity-maps the kernel's low footprint `[0, 4 MiB)`, the
-framebuffer, and the LAPIC MMIO window as **supervisor** pages, plus the user
-image (at `USER_IMAGE_BASE = 0x400000`) and stack as **user** pages. Because
-the kernel runs from low identity memory, every user CR3 must mirror that
-footprint so syscall/IRQ/fault handlers keep working while a user CR3 is active.
-`USER_IMAGE_BASE` sits exactly at the 2 MiB boundary above the kernel image, so
-user and kernel pages never overlap.
+Each process gets a private PML4 (`user_address_space_create`) that identity-maps
+the kernel low footprint `[0, 4 MiB)`, the framebuffer, the LAPIC MMIO and the
+initramfs RAM as **supervisor** pages, plus the user image
+(`USER_IMAGE_BASE = 0x400000`), a 1 MiB heap (`USER_HEAP_BASE`) and the stack as
+**user** pages.
 
-A user task is a kernel thread whose entry trampoline immediately calls
-`user_enter_ring3(rip, rsp, cr3)` (in `user_entry.S`): it disables interrupts,
-loads the user CR3, builds an `iretq` frame (SS=0x1B, RSP=user stack, RFLAGS
-with IF set, CS=0x23, RIP=entry) and `iretq`s to CPL 3. On every context switch
-the scheduler updates **TSS RSP0** to the incoming thread's kernel stack and
-reloads **CR3** when the address space changes.
+Because the user CR3 only mirrors `[0, 4 MiB)`, the kernel cannot reach a
+process's page-table pages or high data frames by physical (identity) address
+while that CR3 is active. So all user-memory access from a syscall — copies
+(`user_copy_*`) and `user_range_is_valid` — and all page-table work (process
+creation and reaping) switch to the **kernel CR3** first, then reach user memory
+by walking the process PML4 + identity-mapped physical frames. These windows
+never sleep, so holding the kernel CR3 across them is safe.
+
+A process is a kernel thread (`thread->proc`) whose trampoline calls
+`user_enter_ring3(rip, rsp, cr3)`: load user CR3, build an `iretq` frame
+(SS=0x1B, RSP, RFLAGS|IF, CS=0x23, RIP) and drop to CPL 3. On every context
+switch the scheduler updates **TSS RSP0** and reloads **CR3** when it changes.
+
+### VFS / devfs / processes
+
+`vfs_resolve` matches the longest mount prefix (ramfs `/`, devfs `/dev`) and
+delegates the remainder to that filesystem's `lookup`. Open files are refcounted
+`(vnode, offset, flags)` tuples referenced by a per-process 32-entry fd table
+(fds 0/1/2 → `/dev/console`). `process_spawn[_argv]` loads an HXE1 image from the
+VFS into a new address space (kernel CR3 active), builds the argv stack and fd
+table, creates the thread and admits it; `process_wait` polls a child to exit,
+copies the code and reaps it.
 
 ### Syscalls (`int 0x80`)
 
-The user ABI is `rax`=number, args in `rdi, rsi, rdx, r10, r8, r9`, result in
-`rax` (negative = error). `syscall_entry.S` saves the GPRs into a
-`struct syscall_frame`, calls `syscall_dispatch`, writes the result back into
-the saved `rax`, and `iretq`s. The Prompt 4 table:
+ABI: `rax`=number, args `rdi, rsi, rdx, r10, r8, r9`, result in `rax`
+(negative = `-errno`). `syscall_entry.S` builds a `struct syscall_frame`, calls
+`syscall_dispatch`, which indexes a static table (`syscall_table.c`). Calls:
+exit, write, read, sleep, getpid, yield, open, close, lseek, readdir, spawn,
+wait, getcwd, chdir, uptime, meminfo, ps. Invalid number → `-38` (`-ENOSYS`);
+bad pointer → `-14` (`-EFAULT`); the kernel never panics on bad user input.
 
-| # | name | behavior |
-|---|------|----------|
-| 0 | exit   | mark task exited, store code, schedule away (never returns) |
-| 1 | write  | fd 1/2 -> console; validates the user buffer; returns bytes written |
-| 2 | read   | fd 0 returns 0 (EOF; no input device yet); len 0 returns 0 |
-| 3 | sleep  | `thread_sleep_ms` |
-| 4 | getpid | current user task id |
-| 5 | yield  | `scheduler_yield` |
+### init, shell, fault isolation
 
-Invalid numbers return `-38` (`-ENOSYS`); bad user pointers return `-14`
-(`-EFAULT`). The kernel never panics on bad user input — pointers are validated
-in software (`user_range_is_valid`) before any access.
-
-### Fault isolation
-
-`x86_exception_dispatch` checks `CS.RPL`: a fault taken in ring 3 is routed to
-`user_fault_handle`, which prints a diagnostic, logs `[OK] User fault isolated`,
-marks the task `FAULTED`, and schedules away — the kernel keeps running. A
-CPL-0 fault keeps the original fatal panic path. `make verify-user-fault`
-launches a program that writes to an unmapped user address and asserts the
-kernel survives.
+`/bin/init.hxe` (PID 1) prints the banner, runs `/tests/{syscall,fd,vfs,spawn,
+fault}_test.hxe`, then `/bin/shell.hxe`, then exits. The shell drains its
+scripted stdin (served by `/dev/console` from the TTY buffer) and spawns the
+coreutils. `fault_test` dereferences an unmapped ring-3 address;
+`x86_exception_dispatch` sees `CS.RPL == 3`, routes to `user_fault_handle`
+(`[OK] User fault isolated`), terminates that process and reschedules — the
+kernel survives. The supervisor reaps init and prints
+`[OK] Userland foundation tests passed`.

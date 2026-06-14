@@ -1,0 +1,1 @@
+[motd] Welcome to MyOS. Type 'help' for available commands.

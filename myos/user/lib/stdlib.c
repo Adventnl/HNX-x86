@@ -1,36 +1,27 @@
-/* User convenience helpers layered on the syscalls. */
+/* exit + numeric parsing. (malloc/free/calloc live in malloc.c.) */
 #include "stdlib.h"
-#include "string.h"
 #include "syscall.h"
 
-long print(const char *s) {
-    return sys_write(1, s, strlen(s));
+void exit(int code) {
+    __syscall(SYS_EXIT, code, 0, 0);
+    for (;;) {           /* exit never returns */
+    }
 }
 
-long eprint(const char *s) {
-    return sys_write(2, s, strlen(s));
-}
-
-void print_u64(uint64_t value) {
-    char buf[21];
-    int i = 20;
-    buf[i] = 0;
-    if (value == 0) {
-        sys_write(1, "0", 1);
-        return;
+int atoi(const char *s) {
+    int sign = 1, v = 0;
+    while (*s == ' ' || *s == '\t') {
+        s++;
     }
-    while (value && i > 0) {
-        buf[--i] = (char)('0' + (value % 10));
-        value /= 10;
+    if (*s == '-') {
+        sign = -1;
+        s++;
+    } else if (*s == '+') {
+        s++;
     }
-    sys_write(1, &buf[i], strlen(&buf[i]));
-}
-
-void print_i64(int64_t value) {
-    if (value < 0) {
-        sys_write(1, "-", 1);
-        print_u64((uint64_t)(-value));
-    } else {
-        print_u64((uint64_t)value);
+    while (*s >= '0' && *s <= '9') {
+        v = v * 10 + (*s - '0');
+        s++;
     }
+    return sign * v;
 }

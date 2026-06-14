@@ -19,8 +19,8 @@ the LLVM linkers (`lld`).
 make all         # build BOOTX64.EFI + kernel.elf
 make bootloader  # build only the EFI application
 make kernel      # build only the kernel ELF
-make user        # build the ring-3 programs (init.hxe, syscall_test.hxe)
-make initramfs   # pack build/image/initramfs.hxf (HXF1)
+make user        # build all ring-3 programs (init, shell, 15 coreutils, 5 tests)
+make initramfs   # pack build/image/initramfs.hxf (HXF1: /bin /tests /etc)
 make image       # build build/image/myos.img (FAT: BOOTX64.EFI + kernel.elf + initramfs.hxf)
 make run         # boot the image in QEMU + OVMF
 make debug       # same as run but halted with a gdb stub on :1234
@@ -49,25 +49,35 @@ make verify-prompt3     # boot + #UD + #PF + interrupts + timer + sched + preemp
 make verify-qemu-matrix # boot-verify across 128M/256M/512M/1024M/2048M
 ```
 
-## User/kernel boundary build + verification (Prompt 4)
+## Userland foundation build + verification (Prompt 4)
 ```bash
-make verify-user-build  # init.hxe + syscall_test.hxe + initramfs.hxf exist
-make verify-initramfs   # [OK] Initramfs file loaded / loaded / parsed
-make verify-user-mode   # [OK] Ring 3 entry online; first user program exits cleanly
-make verify-syscalls    # every [USER] ... OK marker + boundary tests passed
-make verify-user-fault  # a deliberate ring-3 page fault is isolated; kernel survives
+make verify-user-build  # all /bin + /tests HXE programs + initramfs.hxf exist
+make verify-initramfs   # the archive contains every required /bin /tests /etc file
+make verify-user-mode   # [OK] Ring 3 entry online + [USER] hello from ring 3
+make verify-syscalls    # [PASS] syscall_test
+make verify-vfs         # [PASS] vfs_test + [PASS] fd_test
+make verify-process     # [PASS] spawn_test
+make verify-shell       # [PASS] shell scripted session
+make verify-user-fault  # [OK] User fault isolated + Userland foundation tests passed
 make verify-prompt4     # all Prompt 3 targets + all of the above
 ```
+
+The HXE inspector `tools/inspect_hxe.py <file>` and the initramfs inspector
+`tools/inspect_initramfs.py <archive> [--require <path>]` dump/validate the
+custom formats without booting.
 
 ### User-program compiler flags (ring 3, freestanding)
 ```
 --target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protector
 -fno-builtin -fno-pic -fno-pie -mno-red-zone -mno-sse -mno-mmx -msoft-float
--nostdlib -Wall -Wextra   (-Iuser/lib -Ikernel/user for the shared syscall ABI)
+-nostdlib -Wall -Wextra   (-Iuser/include -Ikernel/user for the shared ABI)
 ```
 Linked with `ld.lld -T user/linker.ld -z max-page-size=0x1000` (4 KiB page
 granularity; ld.lld's x86-64 default is 2 MiB), then converted to HXE1 by
 `tools/mkhxe.py`. The initramfs is packed by `tools/mkinitramfs.py` (HXF1).
+Each program links `crt0.o` + its objects + the user runtime
+(`syscall/unistd/stdio/string/stdlib/malloc`); the shell also links
+`parser.o`/`builtins.o`.
 
 ### Kernel FP/SIMD policy (Prompt 3)
 The kernel is compiled with `-mno-sse -mno-sse2 -mno-mmx -msoft-float`. The
@@ -108,18 +118,28 @@ build/image/myos.img
 build/image/qemu.log         (guest-error log from `make run`)
 ```
 
-## Kernel source layout (Prompt 2)
-The kernel is built from four source directories (object names are flattened
-into `build/kernel/`):
+## Kernel source layout
+The kernel is built from these source directories (object names are flattened
+into `build/kernel/`; basenames are unique across dirs):
 ```
 kernel/src/          kernel.c framebuffer_console.c string.c panic.c log.c assert.c
-kernel/arch/x86_64/  entry.S cr.S halt.S port_io.S gdt_load.S isr.S
+kernel/arch/x86_64/  entry.S cr.S halt.S port_io.S gdt_load.S isr.S irq_stubs.S
                      cpu.c serial.c gdt.c tss.c idt.c exceptions.c paging.c
+                     pic.c madt.c apic.c irq.c pit.c lapic_timer.c timer.c
 kernel/memory/       pmm.c vmm.c heap.c (+ memory_layout.h)
-kernel/tests/        early_tests.c
+kernel/sched/        thread.c scheduler.c idle.c sleep.c context_switch.S
+kernel/initramfs/    initramfs.c              (HXF1 parser)
+kernel/user/         user_entry.S syscall_entry.S user.c user_address_space.c
+                     user_loader.c user_copy.c user_fault.c syscall.c syscall_table.c
+kernel/fs/           vfs.c inode.c file.c path.c + ramfs/ramfs.c + devfs/devfs.c
+kernel/device/       device.c char_device.c
+kernel/tty/          console.c tty.c
+kernel/process/      process.c process_table.c fd_table.c exec.c wait.c
+kernel/tests/        early_tests.c scheduler_tests.c user_tests.c
+                     syscall_tests.c vfs_tests.c process_tests.c
 ```
-Include paths: `-Ikernel/include -Ikernel/arch/x86_64 -Ikernel/memory
--Ikernel/tests -Ishared/include`. Same freestanding flags as Prompt 1,
+Include paths add `-Ikernel/fs -Ikernel/fs/ramfs -Ikernel/fs/devfs -Ikernel/device
+-Ikernel/tty -Ikernel/process` to the earlier set. Same freestanding flags,
 `-Wall -Wextra`, no warnings.
 
 ## Serial console

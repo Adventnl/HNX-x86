@@ -1,9 +1,6 @@
-/* MyOS user runtime: common types + the program entry contract.
- *
- * Prompt 4 programs are freestanding (no host libc). crt0.S defines _start,
- * calls main(), and passes main's return value to the exit syscall. */
-#ifndef MYOS_USER_START_H
-#define MYOS_USER_START_H
+/* Freestanding fixed-width types for MyOS user programs (no host libc). */
+#ifndef MYOS_USER_TYPES_H
+#define MYOS_USER_TYPES_H
 
 typedef unsigned char      uint8_t;
 typedef unsigned short     uint16_t;
@@ -14,12 +11,15 @@ typedef short              int16_t;
 typedef int                int32_t;
 typedef long long          int64_t;
 typedef unsigned long long size_t;
+typedef long long          ssize_t;
+typedef unsigned long long uintptr_t;
 
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
 
-/* Provided by each program. */
-int main(void);
+typedef int bool;
+#define true  1
+#define false 0
 
-#endif /* MYOS_USER_START_H */
+#endif /* MYOS_USER_TYPES_H */

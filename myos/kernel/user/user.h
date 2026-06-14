@@ -1,16 +1,16 @@
-/* User/kernel boundary: shared constants for the ring-3 subsystem (Prompt 4).
+/* User/kernel boundary: shared constants for the ring-3 subsystem.
  *
- * Address-space layout (per user task, below the non-canonical hole):
- *   0x0000000000400000  USER_IMAGE_BASE  - HXE1 image is linked/loaded here
- *   ...                                    (code RX, data/bss RW, user pages)
- *   USER_STACK_TOP - SIZE .. USER_STACK_TOP  - user stack (RW, user pages)
- *   < USER_TOP                              - all user virtual addresses
+ * Address-space layout (per process, all in the canonical low half):
+ *   0x0000000000400000  USER_IMAGE_BASE  - HXE1 image (code RX, data/bss RW)
+ *   0x0000004000000000  USER_HEAP_BASE   - bump heap for the user malloc
+ *   USER_STACK_TOP-SIZE .. USER_STACK_TOP - user stack (RW) + argv block
+ *   < USER_TOP                            - all user virtual addresses
  *
- * The kernel keeps running from its identity-mapped low memory, so every user
- * address space also mirrors the kernel's low footprint, the framebuffer, and
- * the Local APIC MMIO window (see user_address_space.c). USER_IMAGE_BASE sits
- * exactly at the 2 MiB boundary above the kernel image so the two never
- * overlap. */
+ * Each address space mirrors the kernel's low footprint, the framebuffer, the
+ * Local APIC MMIO window and the initramfs RAM (supervisor), so kernel code can
+ * run (syscalls / IRQs / faults) and read file data while a user CR3 is active.
+ * Page-table allocation that touches arbitrary physical RAM is instead done with
+ * the kernel CR3 active (see user_copy.c: user_with_kernel_cr3). */
 #ifndef MYOS_USER_H
 #define MYOS_USER_H
 
@@ -18,8 +18,11 @@
 
 #define USER_IMAGE_BASE  0x0000000000400000ULL
 #define USER_STACK_TOP   0x00007FFFFFFFE000ULL
-#define USER_STACK_SIZE  0x0000000000020000ULL   /* 128 KiB */
-#define USER_TOP         0x0000800000000000ULL   /* 128 TiB (canonical low half) */
+#define USER_STACK_SIZE  0x0000000000040000ULL   /* 256 KiB */
+#define USER_HEAP_BASE   0x0000004000000000ULL    /* 256 GiB */
+#define USER_HEAP_SIZE   0x0000000001000000ULL    /* 16 MiB virtual reservation */
+#define USER_HEAP_INITIAL 0x0000000000100000ULL   /* 1 MiB pre-mapped on spawn */
+#define USER_TOP         0x0000800000000000ULL    /* 128 TiB (canonical low half) */
 
 /* Ring-3 segment selectors = GDT user data/code with RPL 3. */
 #define USER_DATA_SELECTOR_RPL3 0x1B

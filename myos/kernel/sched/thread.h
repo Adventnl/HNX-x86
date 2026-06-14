@@ -28,10 +28,10 @@ struct thread {
 
     /* Prompt 4: user-mode integration. cr3 == 0 means "kernel address space";
      * a non-zero value is the user PML4 loaded when this thread is scheduled.
-     * user_task back-points at the owning struct user_task (NULL for kernel
-     * threads), so syscalls can find the current task. */
+     * proc back-points at the owning struct process (NULL for kernel threads),
+     * so syscalls can find the current process. */
     uint64_t cr3;
-    void *user_task;
+    void *proc;
 
     void (*entry)(void *);
     void *arg;

@@ -43,6 +43,11 @@ int initramfs_is_available(void);
  * if not found / unavailable. */
 const void *initramfs_find(const char *path, uint64_t *out_size);
 
+/* Iteration (used by ramfs to build its tree). */
+uint32_t    initramfs_count(void);
+const char *initramfs_path_at(uint32_t index);
+const void *initramfs_data_at(uint32_t index, uint64_t *out_size);
+
 /* Log every entry (path + size) for diagnostics. */
 void initramfs_dump(void);
 

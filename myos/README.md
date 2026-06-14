@@ -18,9 +18,20 @@ myos/
 ├── bootloader/      custom UEFI headers + EFI application sources
 ├── kernel/          ELF64 kernel
 │   ├── initramfs/   HXF1 archive parser
-│   └── user/        ring-3 entry, syscalls, user address spaces, HXE1 loader
-├── user/            ring-3 programs (crt0 + tiny libc, init, syscall_test)
-├── tools/           build_image.py / find_ovmf.py / run_qemu.py / mkhxe.py / mkinitramfs.py
+│   ├── user/        ring-3 entry, syscalls, address spaces, HXE1 loader, copy
+│   ├── fs/          VFS core + ramfs/ + devfs/
+│   ├── device/      device registry + char devices (null/zero)
+│   ├── tty/         /dev/console + TTY v0
+│   └── process/     process model, process table, fd table, exec, wait
+├── user/            ring-3 userland (no host libc)
+│   ├── include/     user headers (types/syscall/unistd/fcntl/stdio/string/stdlib)
+│   ├── lib/         crt0 + runtime (syscall/unistd/stdio/string/stdlib/malloc)
+│   ├── init/        init (PID 1)
+│   ├── shell/       shell + parser + builtins
+│   ├── coreutils/   echo cat ls pwd clear help true false yes whoami …
+│   ├── tests/       syscall/fd/vfs/spawn/fault tests
+│   └── etc/         banner.txt / motd.txt
+├── tools/           build_image / find_ovmf / run_qemu / mkhxe / mkinitramfs / inspect_*
 └── build/           generated artifacts
 ```
 
@@ -62,15 +73,19 @@ Implemented:
   kernel threads with assembly context switch, FIFO round-robin scheduler
   (50 ms quantum), idle thread, tick-based sleep/wakeup, and timer preemption
   — all proven by on-boot scheduler self-tests. Boots to `MyOS Kernel 0.0.3`.
-- **Prompt 4 (stages 55–80):** user/kernel boundary — bootloader loads a custom
-  **HXF1 initramfs**; the kernel parses it and loads a custom **HXE1** user
-  executable into a per-task **user address space** (private PML4 mirroring the
-  kernel footprint + framebuffer + LAPIC). Ring 3 is entered via `iretq`
-  (CS=0x23/SS=0x1B); syscalls use **`int 0x80`** (write/exit/read/sleep/getpid/
-  yield). Each user task rides a kernel thread; the scheduler updates TSS RSP0
-  and switches CR3 on every context switch. Ring-3 faults are **isolated**
-  (the task is terminated, the kernel survives). A first user program (`init`)
-  and a `syscall_test` run from the initramfs. Boots to `MyOS Kernel 0.0.4`.
+- **Prompt 4 (userland foundation mega-phase):** a full first user/kernel +
+  userland layer. The bootloader loads a custom **HXF1 initramfs**; the kernel
+  exposes it as a read-only **ramfs** mounted at `/`, with a **devfs** at `/dev`
+  (`console`/`null`/`zero`) over a small **VFS** (`vnode`/`file`/mount table,
+  path resolution, open/read/write/lseek/readdir/stat). A real **process model**
+  (PID, parent, state, fd table, cwd) loads custom **HXE1** executables into
+  per-process **address spaces** and runs them in ring 3 (`iretq`,
+  CS=0x23/SS=0x1B). **17 `int 0x80` syscalls** (exit/write/read/sleep/getpid/
+  yield/open/close/lseek/readdir/spawn/wait/getcwd/chdir/uptime/meminfo/ps)
+  dispatch through a static table with software-validated user pointers.
+  `/bin/init.hxe` (PID 1) runs five user tests, then a **scripted shell** that
+  spawns 15 **coreutils**. Ring-3 faults are **isolated** (the process dies, the
+  kernel survives). Boots to `MyOS Kernel 0.0.4`.
 
 ### What is tested how
 - **Tested by normal boot** (`make verify-boot`): bootloader, serial, logging,
@@ -83,33 +98,34 @@ Implemented:
 - **Tested by destructive verification targets:** CPU exceptions
   (`make verify-exception`, #UD) and page faults (`make verify-pagefault`, #PF).
 - **Tested across RAM sizes:** `make verify-qemu-matrix` (128M–2048M).
-- **Tested by the user/kernel boundary targets:** `make verify-user-build`
-  (HXE1 + HXF1 artifacts exist), `verify-initramfs` (loaded + parsed),
-  `verify-user-mode` (ring 3 reached, first program exits cleanly),
-  `verify-syscalls` (every syscall marker + boundary tests pass),
-  `verify-user-fault` (a deliberate ring-3 page fault is isolated and the kernel
-  keeps running). `make verify-prompt4` runs the whole chain.
-- **Not yet implemented:** full process model (fork/exec/wait), FD model, devfs
-  console, keyboard, TTY, shell, VFS, persistent FS, drivers, network, GUI, SMP,
-  signals, permissions.
-- **Intentionally deferred:** `kfree` reclamation (bump allocator no-op),
-  dead-thread stack reclamation, BootServices memory reclaim, I/O APIC
-  programming (the PIT line is unrouted; the LAPIC timer is the tick source),
-  W^X for user pages (NXE not enabled in Prompt 4).
+- **Tested by the userland-foundation targets:** `make verify-user-build`
+  (all `/bin` + `/tests` HXE and the initramfs exist), `verify-initramfs` (the
+  archive contains every required file), `verify-user-mode` (ring 3 reached,
+  `[USER] hello from ring 3`), `verify-syscalls` (`[PASS] syscall_test`),
+  `verify-vfs` (`[PASS] vfs_test` + `fd_test`), `verify-process`
+  (`[PASS] spawn_test`), `verify-shell` (`[PASS] shell scripted session`),
+  `verify-user-fault` (a deliberate ring-3 page fault is isolated). `make
+  verify-prompt4` runs the whole chain.
+- **Not yet implemented (Prompt 5+):** persistent disk filesystem, AHCI/NVMe,
+  PCI drivers, USB, keyboard/real TTY input, networking, GUI, SMP, signals,
+  fork, dynamic linking, in-kernel ELF user loader, broad POSIX compatibility.
+- **Intentionally deferred:** `kfree` reclamation (bump allocator no-op; user
+  memory *is* reclaimed on process reap via the PMM), dead-thread stack
+  reclamation, BootServices memory reclaim, I/O APIC programming (the LAPIC
+  timer is the tick source), W^X / NXE for user pages.
 
 See [docs/checkpoints.md](docs/checkpoints.md) for the full per-stage table,
 PMM/VMM design, and verification status.
 
-## Why the repository is still small
-This is an early boot + kernel-foundation project, by design:
-- It contains a UEFI bootloader, a kernel, and a tiny ring-3 userland only —
-  **no** drivers, shell, GUI, persistent filesystem, or network stack yet.
-- The kernel's large `.bss` (stacks + 2 MiB heap arena) is `NOBITS`: it costs
-  zero bytes in the ELF file and is only reserved in RAM at load time, so the
-  on-disk kernel stays tiny.
-- Every claimed capability is backed by a `make verify-*` target rather than
-  prose. Small and verified beats large and fake.
+## Scale philosophy
+The codebase grows by real feature depth, not padding. Prompt 4 adds a broad
+userland foundation (VFS, devfs, processes, fd tables, a shell, 15 coreutils)
+with compact, reusable subsystems and a verification target behind every claim.
+The kernel's large `.bss` (stacks + 2 MiB heap arena) is `NOBITS` — zero bytes
+on disk, reserved only at load — so the on-disk kernel stays small while the
+mapped footprint stays below `USER_IMAGE_BASE` (4 MiB).
 
-Next milestone: **Prompt 5 — process model and interactive userland** (real
-process table, spawn/exec/wait, file-descriptor model, devfs console, keyboard
-input, TTY layer, init process, shell, and first core utilities).
+Next milestone: **Prompt 5 — storage and device expansion mega-phase** (PCI
+device manager, AHCI/NVMe block devices, block cache, a simple persistent
+filesystem, expanded VFS, PS/2 keyboard, real TTY input, an interactive shell,
+more coreutils, and a driver verification matrix).

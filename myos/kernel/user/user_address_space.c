@@ -99,6 +99,14 @@ struct user_address_space *user_address_space_create(void) {
         user_address_space_destroy(space);
         return NULL;
     }
+    /* 2b. Initramfs RAM (supervisor) so ramfs reads work under this CR3. */
+    if (bi->initramfs_base && bi->initramfs_size) {
+        if (map_supervisor_2m(space->pml4, bi->initramfs_base,
+                              bi->initramfs_size, PAGE_PRESENT | PAGE_WRITABLE) != 0) {
+            user_address_space_destroy(space);
+            return NULL;
+        }
+    }
 
     /* 3. Allow ring-3 traversal of the intermediate levels that lead to the
      * user image (the 2 MiB leaves below remain supervisor-only). */
@@ -144,6 +152,24 @@ int user_map_range(struct user_address_space *space, uint64_t va, uint64_t size,
     return 0;
 }
 
+int user_unmap_range(struct user_address_space *space, uint64_t va, uint64_t size) {
+    if (!space || (va & PAGE_MASK)) {
+        return -1;
+    }
+    uint64_t end = va + PAGE_ALIGN_UP(size);
+    if (end <= va || end > USER_TOP) {
+        return -1;
+    }
+    for (uint64_t a = va; a < end; a += PAGE_SIZE) {
+        uint64_t phys = paging_translate(space->pml4, a);
+        if (phys != PAGING_NO_MAP) {
+            paging_unmap_4k(space->pml4, a);
+            pmm_free_page(phys & PAGE_ADDR_MASK);
+        }
+    }
+    return 0;
+}
+
 int user_copy_to_space(struct user_address_space *space, uint64_t user_dst,
                        const void *kernel_src, uint64_t size) {
     if (!space) {
@@ -164,6 +190,32 @@ int user_copy_to_space(struct user_address_space *space, uint64_t user_dst,
         }
         memcpy((void *)(uintptr_t)phys, src, n);
         src += n;
+        cur += n;
+        remaining -= n;
+    }
+    return 0;
+}
+
+int user_copy_from_space(struct user_address_space *space, void *kernel_dst,
+                         uint64_t user_src, uint64_t size) {
+    if (!space) {
+        return -1;
+    }
+    uint8_t *dst = (uint8_t *)kernel_dst;
+    uint64_t cur = user_src;
+    uint64_t remaining = size;
+    while (remaining) {
+        uint64_t phys = paging_translate(space->pml4, cur);
+        if (phys == PAGING_NO_MAP) {
+            return -1;
+        }
+        uint64_t off = cur & PAGE_MASK;
+        uint64_t n = PAGE_SIZE - off;
+        if (n > remaining) {
+            n = remaining;
+        }
+        memcpy(dst, (const void *)(uintptr_t)phys, n);
+        dst += n;
         cur += n;
         remaining -= n;
     }

@@ -242,90 +242,142 @@ sleep loop), C (8-tick busy spin per round → forced quantum preemption), and a
 checker that validates counters, switch/preempt/wakeup counts and tick
 progress, then prints the `[TEST]`/`[PASS]` protocol.
 
-## Prompt 4 — user/kernel boundary (stages 55–80)
+## Prompt 4 — userland foundation mega-phase
 
-| # | Stage | Where | Done |
-|---|-------|-------|------|
-| 55 | Bootloader initramfs loading | `bootloader/src/efi_main.c` | ✅ |
-| 56 | Initramfs archive format + packer | `tools/mkinitramfs.py` (HXF1) | ✅ |
-| 57 | Kernel initramfs parser | `kernel/initramfs/initramfs.{c,h}` | ✅ |
-| 58 | User executable format | `kernel/user/user_loader.h` (HXE1) | ✅ |
-| 59 | User program build system | `Makefile` (`make user`), `tools/mkhxe.py` | ✅ |
-| 60 | User-space runtime layout | `user/lib/*`, `user/linker.ld` | ✅ |
-| 61 | User address space creation | `kernel/user/user_address_space.c` | ✅ |
-| 62 | User page mapping helpers | `user_map_page/range`, `user_copy_to_space` | ✅ |
-| 63 | Ring 3 GDT/TSS validation | `kernel/user/user.c`, `tss_set_rsp0` | ✅ |
-| 64 | User-mode entry path | `kernel/user/user_entry.S` | ✅ |
-| 65 | Syscall vector setup | `kernel/user/syscall.c` (`int 0x80`, DPL 3) | ✅ |
-| 66 | Syscall assembly entry | `kernel/user/syscall_entry.S` | ✅ |
-| 67 | Syscall dispatcher | `kernel/user/syscall.c` (`syscall_dispatch`) | ✅ |
-| 68 | Basic syscall table | `kernel/user/syscall_numbers.h` | ✅ |
-| 69 | write syscall | `sys_write` (fd 1/2, validated copy) | ✅ |
-| 70 | exit syscall | `sys_exit` -> `user_task_exit_current` | ✅ |
-| 71 | yield syscall | `sys_yield` -> `scheduler_yield` | ✅ |
-| 72 | sleep syscall | `sys_sleep` -> `thread_sleep_ms` | ✅ |
-| 73 | getpid syscall | `sys_getpid` (user task id) | ✅ |
-| 74 | read syscall stub | `sys_read` (fd 0 EOF / len 0 -> 0) | ✅ |
-| 75 | User task/thread integration | `kernel/user/user_task.c`, scheduler CR3/RSP0 | ✅ |
-| 76 | User fault handling | `kernel/user/user_fault.c`, `exceptions.c` | ✅ |
-| 77 | First user program | `user/init/init.c` | ✅ |
-| 78 | User syscall tests | `user/tests/syscall_test.c`, `kernel/tests/user_tests.c` | ✅ |
-| 79 | Verification targets | `Makefile` (`verify-user-*`, `verify-prompt4`) | ✅ |
-| 80 | Documentation | `README.md`, `docs/*` | ✅ |
+A full first user/kernel + userland layer: ring 3, syscalls, a real VFS with
+ramfs/devfs, a process model (spawn/wait/exit), file-descriptor tables, a TTY
++ console, an init process, a scripted shell, 15 coreutils, and 5 user tests.
+
+| Subsystem | Where |
+|-----------|-------|
+| Bootloader initramfs load | `bootloader/src/efi_main.c`, `boot_info.initramfs_*` |
+| HXF1 initramfs format + packer | `tools/mkinitramfs.py`, `tools/inspect_initramfs.py` |
+| Kernel initramfs parser | `kernel/initramfs/initramfs.{c,h}` |
+| HXE1 user executable + loader | `kernel/user/user_loader.{c,h}`, `tools/mkhxe.py`, `tools/inspect_hxe.py` |
+| User runtime (no libc) | `user/include/*`, `user/lib/*` |
+| User address spaces | `kernel/user/user_address_space.{c,h}` |
+| Ring 3 transition | `kernel/user/user_entry.S`, `user.{c,h}`, `tss_set_rsp0` |
+| Syscall entry / table / dispatch | `kernel/user/syscall_entry.S`, `syscall_table.{c,h}`, `syscall.{c,h}` |
+| User pointer validation / copy | `kernel/user/user_copy.{c,h}` |
+| File-descriptor table | `kernel/process/fd_table.{c,h}` |
+| VFS core | `kernel/fs/{vfs,inode,file,path}.{c,h}` |
+| ramfs (initramfs view) | `kernel/fs/ramfs/ramfs.{c,h}` |
+| devfs | `kernel/fs/devfs/devfs.{c,h}` |
+| Device registry / char devices | `kernel/device/{device,char_device}.{c,h}` |
+| Console + TTY v0 | `kernel/tty/{console,tty}.{c,h}` |
+| Process / task model v0 | `kernel/process/{process,process_table}.{c,h}` |
+| spawn / exec / wait / exit | `kernel/process/{exec,wait}.{c,h}`, `process.c` |
+| User fault isolation | `kernel/user/user_fault.{c,h}`, `exceptions.c` |
+| init / shell / coreutils / tests | `user/init`, `user/shell`, `user/coreutils`, `user/tests` |
+| Kernel-side unit tests | `kernel/tests/{syscall,vfs,process,user}_tests.{c,h}` |
 
 ### HXF1 initramfs format
 Custom read-only archive (not tar/cpio/zip): `struct hxf_header` (magic
 `0x31465848`, version, entry_count, header_size) + `struct hxf_entry`
-(`char path[128]`, offset, size, flags) × N + blobs. The bootloader loads
-`\boot\initramfs.hxf` as `EfiLoaderData`; the kernel parses it in place
-(identity-mapped, never freed). Packed by `tools/mkinitramfs.py`.
+(`char path[128]`, offset, size, flags) × N + 8-byte-aligned blobs. The
+bootloader loads `\boot\initramfs.hxf` as `EfiLoaderData`; the kernel parses it
+in place (identity-mapped, never freed) and ramfs builds a directory tree over
+it. Packed by `tools/mkinitramfs.py`, inspected by `tools/inspect_initramfs.py`.
 
 ### HXE1 user executable format
-Custom load format (the kernel does **not** parse ELF in ring 0):
-`struct hxe_header` (magic `0x31455848`, version, entry, segment_count,
-header_size) + `struct hxe_segment` (vaddr, memsz, filesz, file_offset, flags
-R/W/X) × N + segment bytes. `tools/mkhxe.py` flattens a linked user ELF's
-PT_LOAD program headers into HXE1 (file_size ≤ memory_size, addresses below
-`USER_TOP` and ≥ `USER_IMAGE_BASE`, no overlap, entry inside an exec segment).
+The kernel never parses ELF in ring 0. `struct hxe_header` (magic `0x31455848`,
+version, entry, segment_count, header_size) + `struct hxe_segment` (vaddr,
+memsz, filesz, file_offset, R/W/X flags) × N + segment bytes. `tools/mkhxe.py`
+flattens a linked user ELF's PT_LOAD program headers into HXE1.
 
 ### User address space layout
-`USER_IMAGE_BASE=0x400000`, `USER_STACK_TOP=0x7FFFFFFFE000`,
-`USER_STACK_SIZE=0x20000`, `USER_TOP=0x800000000000`. Each task's PML4 mirrors
-the kernel low footprint `[0, 4 MiB)`, the framebuffer, and the LAPIC MMIO as
-supervisor pages (so kernel handlers run under any user CR3), plus user image +
-stack as user pages. The image base sits at the 2 MiB boundary above the kernel
-image, so kernel and user pages never overlap. `kfree`/page reclamation in
-`user_address_space_destroy` frees only user-flagged leaves and the per-space
-tables.
+`USER_IMAGE_BASE=0x400000`, `USER_HEAP_BASE=0x4000000000` (1 MiB pre-mapped),
+`USER_STACK_TOP=0x7FFFFFFFE000`, `USER_STACK_SIZE=0x40000`,
+`USER_TOP=0x800000000000`. Each process PML4 mirrors the kernel low footprint
+`[0, 4 MiB)`, the framebuffer, the LAPIC MMIO, and the initramfs RAM as
+supervisor pages (so kernel code and ramfs reads work under any user CR3), plus
+the user image / heap / stack as user pages.
+
+### CR3 discipline (key invariant)
+A syscall runs with the calling process's CR3 active, so user **data** is reached
+directly at its virtual address — but the user CR3 only mirrors `[0, 4 MiB)`, so
+the user's *page-table pages* and high data frames are not addressable by
+physical (identity) address under it. Therefore:
+* User-memory copies (`user_copy_*`) and validation switch to the **kernel CR3**
+  and access user memory by walking the process PML4 + identity-mapped physical
+  frames. Non-blocking window, so holding kernel CR3 across it is safe.
+* Process creation (page-table allocation, image copy) and reaping (page-table
+  teardown) also run with the kernel CR3 active (`process_spawn_argv`, `wait.c`).
 
 ### int 0x80 syscall ABI
 `rax`=number; args `rdi, rsi, rdx, r10, r8, r9`; result in `rax`; negative =
-error. Vector `0x80` is a DPL-3 interrupt gate. Invalid number → `-38`
-(`-ENOSYS`); bad user pointer → `-14` (`-EFAULT`); the kernel validates user
-pointers in software and never panics on bad user input.
+`-errno`. Vector `0x80` is a DPL-3 interrupt gate. Invalid number → `-38`
+(`-ENOSYS`). Calls: exit, write, read, sleep, getpid, yield, open, close,
+lseek, readdir, spawn, wait, getcwd, chdir, uptime, meminfo, ps. A static table
+(`syscall_table.c`) maps numbers to handlers; every user pointer is validated in
+software and the kernel never panics on bad user input.
 
-### read syscall limitation
-There is no console input device in Prompt 4: `read(0, …)` returns `0` (EOF) and
-any `read` with length `0` returns `0`. A real device/TTY-backed read arrives in
-Prompt 5.
+### VFS design
+`struct vnode` (file / dir / chardev + `vnode_ops`), `struct file` (refcounted
+vnode + offset + flags), `struct filesystem` (name + `lookup`), a small mount
+table, and path normalization (`path_resolve`). `vfs_resolve` finds the longest
+matching mount prefix and delegates the remainder to that filesystem.
+fd-based ops act on the current process's fd table. Mounts: ramfs at `/`,
+devfs at `/dev`.
+
+### devfs design
+Synthesizes `/dev` from the character-device registry: `/dev/console`
+(framebuffer+serial out, scripted TTY in), `/dev/null` (read EOF / write
+sink), `/dev/zero` (read zeroes / write sink).
+
+### FD table
+Per-process fixed array of 32 open-file pointers; `fd_alloc` (lowest-free),
+`fd_close`, `fd_get`, `fd_install_at`. fds 0/1/2 are wired to a shared,
+refcounted `/dev/console` open file at process creation.
+
+### Process model v0
+`struct process` { pid, parent_pid, name, state, exit_code, address_space,
+main_thread, fds, cwd, entry_rip, user_rsp }. One kernel thread per process,
+bound via `thread->proc`. `process_spawn[_argv]` loads HXE1 from the VFS, builds
+the address space + argv stack + fd table, creates the thread, and admits it.
+`process_wait` polls a child to termination, copies its exit code, and reaps it
+(address space + fds freed). `process_exit_current` / `process_fault_current`
+mark the process and reschedule. The process table is a 64-slot array with
+monotonic PIDs, interrupt-safe alloc/free.
+
+### TTY v0 + scripted shell
+No keyboard yet (Prompt 5). The TTY keeps a scripted input buffer that
+`/dev/console` serves to readers until exhausted (then EOF). The kernel
+pre-loads a shell command script; `/bin/shell.hxe` drains stdin, executes each
+line (builtins `cd`/`exit` in-process, everything else spawned as
+`/bin/<cmd>.hxe`), and prints `[PASS] shell scripted session`.
+
+### init + userland flow
+`/bin/init.hxe` (PID 1) prints the banner, runs `/tests/{syscall,fd,vfs,spawn,
+fault}_test.hxe`, launches the scripted shell, and exits 0. The fault test
+deliberately dereferences an unmapped ring-3 address; the kernel prints
+`[OK] User fault isolated` and continues. The kernel supervisor reaps init and
+prints `[OK] Userland foundation tests passed`.
+
+### coreutils
+`echo cat ls pwd clear help true false yes whoami uptime meminfo ps testread
+hello` — each a standalone HXE1 program under `/bin`.
 
 ### User fault isolation
 `x86_exception_dispatch` routes any fault with `CS.RPL == 3` to
 `user_fault_handle`, which prints a diagnostic, logs `[OK] User fault isolated`,
-marks the task `FAULTED`, and reschedules — the kernel never panics on a user
-fault. CPL-0 faults keep the original fatal path.
+marks the process `FAULTED`, and reschedules. CPL-0 faults keep the fatal path.
 
 ### Verification (Prompt 4)
 | Target | Asserts |
 |--------|---------|
-| `make verify-user-build` | `init.hxe`, `syscall_test.hxe`, `initramfs.hxf` exist |
-| `make verify-initramfs` | initramfs file loaded (bootloader) + loaded/parsed (kernel) |
-| `make verify-user-mode` | ring 3 entry online; first user program exits cleanly |
-| `make verify-syscalls` | every `[USER] … OK` marker + `User/kernel boundary tests passed` |
-| `make verify-user-fault` | a deliberate ring-3 #PF is isolated; kernel keeps running |
+| `make verify-user-build` | every `/bin` + `/tests` HXE and the initramfs exist |
+| `make verify-initramfs` | the archive contains all required `/bin`, `/tests`, `/etc` files |
+| `make verify-user-mode` | `[OK] Ring 3 entry online`, `[USER] hello from ring 3` |
+| `make verify-syscalls` | `[PASS] syscall_test` |
+| `make verify-vfs` | `[PASS] vfs_test`, `[PASS] fd_test` |
+| `make verify-process` | `[PASS] spawn_test` |
+| `make verify-shell` | `[PASS] shell scripted session` |
+| `make verify-user-fault` | `[OK] User fault isolated` + `[OK] Userland foundation tests passed` |
 | `make verify-prompt4` | all Prompt 3 targets + all of the above |
 
 ## Next milestone (after Prompt 4)
-**Prompt 5 — process model and interactive userland:** real process table,
-spawn/exec/wait, file-descriptor model, devfs console, keyboard input, TTY
-layer, init process, shell, and first core utilities.
+**Prompt 5 — storage and device expansion mega-phase:** PCI device manager,
+AHCI/NVMe block devices, block cache, a simple persistent filesystem, expanded
+VFS, PS/2 keyboard, real TTY input, an interactive shell, more coreutils, and a
+driver verification matrix.

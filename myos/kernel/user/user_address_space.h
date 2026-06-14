@@ -28,10 +28,20 @@ int user_map_page(struct user_address_space *space, uint64_t virtual_address,
 int user_map_range(struct user_address_space *space, uint64_t virtual_address,
                    uint64_t size, uint64_t flags);
 
+/* Unmap + free `size` bytes (page granular) of user memory at `virtual_address`.
+ * Returns 0/err. Only user (PAGE_USER) leaves are freed. */
+int user_unmap_range(struct user_address_space *space, uint64_t virtual_address,
+                     uint64_t size);
+
 /* Copy `size` bytes from kernel memory into already-mapped user pages (written
- * through the frames' identity addresses, so this is safe under any CR3). */
+ * through the frames' identity addresses, so the kernel CR3 must be active). */
 int user_copy_to_space(struct user_address_space *space, uint64_t user_dst,
                        const void *kernel_src, uint64_t size);
+
+/* Copy `size` bytes out of already-mapped user pages into kernel memory (read
+ * through the frames' identity addresses; kernel CR3 must be active). */
+int user_copy_from_space(struct user_address_space *space, void *kernel_dst,
+                         uint64_t user_src, uint64_t size);
 
 /* Zero `size` bytes of already-mapped user memory. */
 int user_zero_in_space(struct user_address_space *space, uint64_t user_dst,

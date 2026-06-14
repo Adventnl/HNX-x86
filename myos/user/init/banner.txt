@@ -1,4 +1,0 @@
-MyOS 0.0.4 — user/kernel boundary online.
-Packed into the HXF1 initramfs at /etc/banner.txt to demonstrate multi-file
-archive packing. Reading files from the initramfs is a later milestone (Prompt 4
-has no VFS / open / file-backed read syscall yet).

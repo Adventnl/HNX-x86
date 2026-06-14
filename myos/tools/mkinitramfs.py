@@ -54,7 +54,7 @@ def main():
         files.append((pb, blob))
 
     n = len(files)
-    blob_base = HXF_HDR_SIZE + n * HXF_ENTRY_SIZE
+    blob_base = HXF_HDR_SIZE + n * HXF_ENTRY_SIZE   # 16 + n*152, already 8-aligned
 
     entries = bytearray()
     blobs = bytearray()
@@ -65,6 +65,10 @@ def main():
         entries += struct.pack("<QQQ", cursor, len(blob), 0)
         blobs += blob
         cursor += len(blob)
+        # 8-byte align the next blob (HXF1 requires aligned entries/data).
+        pad = (-len(blob)) % 8
+        blobs += b"\x00" * pad
+        cursor += pad
 
     header = struct.pack("<IIII", HXF_MAGIC, HXF_VERSION, n, HXF_HDR_SIZE)
     out = bytes(header) + bytes(entries) + bytes(blobs)

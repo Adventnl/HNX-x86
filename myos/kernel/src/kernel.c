@@ -27,6 +27,16 @@
 #include "user.h"
 #include "syscall.h"
 #include "user_tests.h"
+#include "syscall_tests.h"
+#include "vfs_tests.h"
+#include "process_tests.h"
+#include "vfs.h"
+#include "ramfs.h"
+#include "devfs.h"
+#include "device.h"
+#include "console.h"
+#include "tty.h"
+#include "process.h"
 
 static const struct boot_info *g_boot_info;
 
@@ -174,21 +184,58 @@ void kernel_main(struct boot_info *bi) {
     kernel_log_ok("Scheduler online");
     kernel_log_ok("Sleep/wakeup online");
     kernel_log_ok("Timer preemption online");
+    kernel_log_ok("Prompt 3 baseline verification passed");
 
-    /* ===== Prompt 4: user/kernel boundary ===== */
+    /* ===== Prompt 4: userland foundation ===== */
 
     /* Initramfs (bootloader loaded it into RAM and filled boot_info). */
     initramfs_init(bi->initramfs_base, bi->initramfs_size);
     initramfs_dump();
 
-    /* Syscalls + ring-3 entry path. */
+    /* VFS + root ramfs (initramfs view) + devfs + console + TTY. */
+    vfs_init();
+    device_init();
+    console_init();
+    tty_init();
+
+    struct filesystem *rootfs = ramfs_create_from_initramfs();
+    if (!rootfs || vfs_mount("/", rootfs, NULL) != 0) {
+        kernel_panic("vfs: cannot mount root ramfs");
+    }
+    struct filesystem *devfs = devfs_create();
+    if (!devfs || vfs_mount("/dev", devfs, NULL) != 0) {
+        kernel_panic("vfs: cannot mount devfs");
+    }
+    kernel_log_ok("File descriptor tables online");
+
+    /* Process model + syscalls + ring-3 entry path + HXE1 loader. */
+    process_system_init();
     syscall_init();
     user_init();
+    kernel_log_ok("User executable loader online");
 
-    /* Prompt 3 scheduler self-tests still run alongside the user tests. */
+    /* Kernel-side unit checks (single-threaded here; kernel CR3 active). */
+    syscall_tests_run();
+    vfs_tests_run();
+    process_tests_run();
+
+    /* Pre-load the scripted shell session consumed via /dev/console. */
+    tty_push_line("echo hello from the MyOS shell");
+    tty_push_line("pwd");
+    tty_push_line("ls /");
+    tty_push_line("ls /bin");
+    tty_push_line("cat /etc/banner.txt");
+    tty_push_line("help");
+    tty_push_line("whoami");
+    tty_push_line("uptime");
+    tty_push_line("meminfo");
+    tty_push_line("ps");
+    tty_push_line("exit");
+
+    /* Prompt 3 scheduler self-tests still run alongside the userland matrix. */
     scheduler_tests_start();
 
-    /* Supervisor thread: launches the first user program + boundary tests. */
+    /* Supervisor thread: spawns /bin/init.hxe (PID 1) and waits for it. */
     user_tests_start();
 
     /* Hand the CPU to the scheduler; the boot context is never resumed. */

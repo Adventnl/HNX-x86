@@ -95,6 +95,28 @@ const void *initramfs_find(const char *path, uint64_t *out_size) {
     return NULL;
 }
 
+uint32_t initramfs_count(void) {
+    return g_available ? g_header->entry_count : 0;
+}
+
+const char *initramfs_path_at(uint32_t index) {
+    if (!g_available || index >= g_header->entry_count) {
+        return NULL;
+    }
+    return g_entries[index].path;
+}
+
+const void *initramfs_data_at(uint32_t index, uint64_t *out_size) {
+    if (!g_available || index >= g_header->entry_count) {
+        return NULL;
+    }
+    const struct hxf_entry *e = &g_entries[index];
+    if (out_size) {
+        *out_size = e->size;
+    }
+    return (const void *)(uintptr_t)(g_base + e->offset);
+}
+
 void initramfs_dump(void) {
     if (!g_available) {
         kernel_log_line("    (initramfs unavailable)");
