@@ -66,3 +66,27 @@ int meminfo(struct sys_meminfo *out) {
 int ps(struct sys_ps_entry *out, int max) {
     return (int)__syscall(SYS_PS, (long)out, max, 0);
 }
+
+int mkdir(const char *path) {
+    return (int)__syscall(SYS_MKDIR, (long)path, 0, 0);
+}
+
+int unlink(const char *path) {
+    return (int)__syscall(SYS_UNLINK, (long)path, 0, 0);
+}
+
+int stat(const char *path, struct sys_stat *out) {
+    return (int)__syscall(SYS_STAT, (long)path, (long)out, 0);
+}
+
+int mounts(struct sys_mount_entry *out, int max) {
+    return (int)__syscall(SYS_MOUNT_INFO, (long)out, max, 0);
+}
+
+int devices(struct sys_device_entry *out, int max) {
+    return (int)__syscall(SYS_DEVICES, (long)out, max, 0);
+}
+
+int blocks(struct sys_block_entry *out, int max) {
+    return (int)__syscall(SYS_BLOCKS, (long)out, max, 0);
+}

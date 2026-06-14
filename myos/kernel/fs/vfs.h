@@ -36,4 +36,14 @@ int64_t vfs_lseek(int fd, int64_t offset, int whence);
 int     vfs_readdir(int fd, struct dirent *out);   /* 1 = entry, 0 = end, <0 err */
 int     vfs_stat(const char *path, struct stat *out);
 
+/* Namespace mutation (writable filesystems). */
+int     vfs_mkdir(const char *path);
+int     vfs_create(const char *path);
+int     vfs_unlink(const char *path);
+
+/* Mount table introspection (for the `mounts` coreutil). */
+int     vfs_mount_count(void);
+int     vfs_mount_info(int index, char *path_out, uint64_t path_size,
+                       char *fs_out, uint64_t fs_size);
+
 #endif /* MYOS_FS_VFS_H */

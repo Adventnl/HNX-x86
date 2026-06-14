@@ -38,6 +38,11 @@ struct vnode_ops {
     /* Fill the `index`-th child of a directory; returns 0 on success,
      * negative when `index` is past the end. */
     int (*readdir)(struct vnode *vn, uint64_t index, struct dirent *out);
+    /* Create a child file/dir in this directory (writable filesystems only). */
+    int (*create)(struct vnode *dir, const char *name, enum vnode_type type,
+                  struct vnode **out);
+    /* Remove a child by name. */
+    int (*unlink)(struct vnode *dir, const char *name);
 };
 
 struct vnode {

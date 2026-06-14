@@ -20,6 +20,12 @@ static const syscall_fn g_table[SYS_MAX_NR] = {
     [SYS_UPTIME]  = sys_uptime,
     [SYS_MEMINFO] = sys_meminfo,
     [SYS_PS]      = sys_ps,
+    [SYS_MKDIR]   = sys_mkdir,
+    [SYS_UNLINK]  = sys_unlink,
+    [SYS_STAT]    = sys_stat,
+    [SYS_MOUNT_INFO] = sys_mount_info,
+    [SYS_DEVICES] = sys_devices,
+    [SYS_BLOCKS]  = sys_blocks,
 };
 
 syscall_fn syscall_table_get(uint64_t nr) {

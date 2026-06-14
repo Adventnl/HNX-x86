@@ -31,5 +31,11 @@ int64_t sys_chdir(struct syscall_frame *f);
 int64_t sys_uptime(struct syscall_frame *f);
 int64_t sys_meminfo(struct syscall_frame *f);
 int64_t sys_ps(struct syscall_frame *f);
+int64_t sys_mkdir(struct syscall_frame *f);
+int64_t sys_unlink(struct syscall_frame *f);
+int64_t sys_stat(struct syscall_frame *f);
+int64_t sys_mount_info(struct syscall_frame *f);
+int64_t sys_devices(struct syscall_frame *f);
+int64_t sys_blocks(struct syscall_frame *f);
 
 #endif /* MYOS_SYSCALL_TABLE_H */

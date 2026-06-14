@@ -30,6 +30,27 @@ void x86_halt_forever(void) __attribute__((noreturn));
 uint8_t x86_inb(uint16_t port);
 void    x86_outb(uint16_t port, uint8_t value);
 
+/* 16/32-bit port I/O (inline; used by PCI CF8/CFC and PS/2). */
+static inline uint16_t x86_inw(uint16_t port) {
+    uint16_t v;
+    __asm__ volatile("inw %1, %0" : "=a"(v) : "Nd"(port));
+    return v;
+}
+static inline void x86_outw(uint16_t port, uint16_t v) {
+    __asm__ volatile("outw %0, %1" : : "a"(v), "Nd"(port));
+}
+static inline uint32_t x86_inl(uint16_t port) {
+    uint32_t v;
+    __asm__ volatile("inl %1, %0" : "=a"(v) : "Nd"(port));
+    return v;
+}
+static inline void x86_outl(uint16_t port, uint32_t v) {
+    __asm__ volatile("outl %0, %1" : : "a"(v), "Nd"(port));
+}
+static inline void x86_io_wait(void) {
+    __asm__ volatile("outb %%al, $0x80" : : "a"(0));
+}
+
 /* ---- Misc inline helpers ------------------------------------------------- */
 static inline void x86_cli(void) { __asm__ volatile("cli"); }
 static inline void x86_sti(void) { __asm__ volatile("sti"); }

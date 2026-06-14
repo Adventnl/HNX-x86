@@ -41,7 +41,11 @@ BOOT_LDFLAGS := /subsystem:efi_application /entry:EfiMain /nodefaultlib
 KERN_INCLUDES := -Ikernel/include -Ikernel/arch/x86_64 -Ikernel/memory \
                  -Ikernel/sched -Ikernel/tests -Ikernel/initramfs \
                  -Ikernel/user -Ikernel/fs -Ikernel/fs/ramfs -Ikernel/fs/devfs \
-                 -Ikernel/device -Ikernel/tty -Ikernel/process -Ishared/include
+                 -Ikernel/fs/hnxfs -Ikernel/device -Ikernel/tty -Ikernel/process \
+                 -Ikernel/driver -Ikernel/pci -Ikernel/block -Ikernel/partition \
+                 -Ikernel/storage -Ikernel/storage/ahci -Ikernel/storage/nvme \
+                 -Ikernel/input -Ikernel/input/ps2 -Ikernel/input/keyboard \
+                 -Ishared/include
 # EXTRA_KCFLAGS is injected by the verify-* targets to enable destructive tests.
 EXTRA_KCFLAGS ?=
 # -mno-sse/-mno-mmx/-msoft-float: IRQ stubs save only the GPRs, so the kernel
@@ -76,8 +80,14 @@ KERN_CSRC := $(wildcard kernel/src/*.c) $(wildcard kernel/arch/x86_64/*.c) \
              $(wildcard kernel/tests/*.c) $(wildcard kernel/initramfs/*.c) \
              $(wildcard kernel/user/*.c) $(wildcard kernel/fs/*.c) \
              $(wildcard kernel/fs/ramfs/*.c) $(wildcard kernel/fs/devfs/*.c) \
+             $(wildcard kernel/fs/hnxfs/*.c) \
              $(wildcard kernel/device/*.c) $(wildcard kernel/tty/*.c) \
-             $(wildcard kernel/process/*.c)
+             $(wildcard kernel/process/*.c) $(wildcard kernel/driver/*.c) \
+             $(wildcard kernel/pci/*.c) $(wildcard kernel/block/*.c) \
+             $(wildcard kernel/partition/*.c) $(wildcard kernel/storage/*.c) \
+             $(wildcard kernel/storage/ahci/*.c) $(wildcard kernel/storage/nvme/*.c) \
+             $(wildcard kernel/input/*.c) $(wildcard kernel/input/ps2/*.c) \
+             $(wildcard kernel/input/keyboard/*.c)
 KERN_SSRC := $(wildcard kernel/arch/x86_64/*.S) $(wildcard kernel/sched/*.S) \
              $(wildcard kernel/user/*.S)
 KERN_OBJ  := $(addprefix $(B_KERN)/,$(notdir $(KERN_CSRC:.c=.o))) \
@@ -87,12 +97,21 @@ KERN_HDR  := $(wildcard kernel/include/*.h) $(wildcard kernel/arch/x86_64/*.h) \
              $(wildcard kernel/tests/*.h) $(wildcard kernel/initramfs/*.h) \
              $(wildcard kernel/user/*.h) $(wildcard kernel/fs/*.h) \
              $(wildcard kernel/fs/ramfs/*.h) $(wildcard kernel/fs/devfs/*.h) \
+             $(wildcard kernel/fs/hnxfs/*.h) \
              $(wildcard kernel/device/*.h) $(wildcard kernel/tty/*.h) \
-             $(wildcard kernel/process/*.h) shared/include/boot_info.h
+             $(wildcard kernel/process/*.h) $(wildcard kernel/driver/*.h) \
+             $(wildcard kernel/pci/*.h) $(wildcard kernel/block/*.h) \
+             $(wildcard kernel/partition/*.h) $(wildcard kernel/storage/*.h) \
+             $(wildcard kernel/storage/ahci/*.h) $(wildcard kernel/storage/nvme/*.h) \
+             $(wildcard kernel/input/*.h) $(wildcard kernel/input/ps2/*.h) \
+             $(wildcard kernel/input/keyboard/*.h) shared/include/boot_info.h
 
 vpath %.c kernel/src kernel/arch/x86_64 kernel/memory kernel/sched kernel/tests \
           kernel/initramfs kernel/user kernel/fs kernel/fs/ramfs kernel/fs/devfs \
-          kernel/device kernel/tty kernel/process
+          kernel/fs/hnxfs kernel/device kernel/tty kernel/process kernel/driver \
+          kernel/pci kernel/block kernel/partition kernel/storage \
+          kernel/storage/ahci kernel/storage/nvme kernel/input kernel/input/ps2 \
+          kernel/input/keyboard
 vpath %.S kernel/arch/x86_64 kernel/sched kernel/user
 
 # ---- User-space sources / objects ------------------------------------------
@@ -101,12 +120,18 @@ USER_LIB_OBJ := $(B_USER)/syscall.o $(B_USER)/string.o $(B_USER)/stdlib.o \
 USER_CRT0    := $(B_USER)/crt0.o
 # Programs installed under /bin and /tests in the initramfs.
 USER_BIN     := init shell echo cat ls pwd clear help true false yes whoami \
-                uptime meminfo ps testread hello
-USER_TEST    := syscall_test fd_test spawn_test vfs_test fault_test
+                uptime meminfo ps testread hello \
+                mkdir rm touch writefile readfile hexdump stat mounts devices \
+                blocks lspci lsblk keyboard_test tty_test
+USER_TEST    := syscall_test fd_test spawn_test vfs_test fault_test \
+                storage_test fs_test disk_test cache_test
 USER_PROGS   := $(addprefix $(B_USER)/,$(addsuffix .hxe,$(USER_BIN) $(USER_TEST)))
 USER_HDR     := $(wildcard user/include/*.h) kernel/user/syscall_numbers.h \
                 kernel/user/syscall_abi.h
 INITRAMFS    := $(B_IMG)/initramfs.hxf
+STORAGE_IMG  := $(B_IMG)/storage.img
+HNXFS_IMG    := $(B_IMG)/hnxfs.img
+NVME_IMG     := $(B_IMG)/nvme.img
 
 BOOTX64 := $(B_BOOT)/BOOTX64.EFI
 KERNEL  := $(B_KERN)/kernel.elf
@@ -119,13 +144,15 @@ define need
 endef
 
 # ---- Phony targets ---------------------------------------------------------
-.PHONY: all bootloader kernel user initramfs image run debug clean dirs \
+.PHONY: all bootloader kernel user initramfs image storage-image run debug clean dirs \
         inspect loc run-headless \
         verify-boot verify-exception verify-pagefault verify-qemu-matrix \
         verify-interrupts verify-timer verify-scheduler verify-preemption \
         verify-prompt3 verify-user-build verify-initramfs verify-user-mode \
         verify-syscalls verify-vfs verify-process verify-shell \
-        verify-user-fault verify-prompt4
+        verify-user-fault verify-prompt4 \
+        verify-pci verify-block verify-storage verify-hnxfs verify-keyboard \
+        verify-tty verify-expanded-userland verify-prompt5
 .DEFAULT_GOAL := all
 
 all: bootloader kernel
@@ -176,6 +203,8 @@ $(B_USER)/%.o: user/coreutils/%.c $(USER_HDR) | dirs
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 $(B_USER)/%.o: user/tests/%.c $(USER_HDR) | dirs
 	$(CC) $(USER_CFLAGS) -c $< -o $@
+$(B_USER)/%.o: user/storage/%.c $(USER_HDR) | dirs
+	$(CC) $(USER_CFLAGS) -c $< -o $@
 
 $(B_USER)/crt0.o: user/lib/crt0.S $(USER_HDR) | dirs
 	$(call need,$(CC),Install LLVM/clang. macOS: brew install llvm)
@@ -206,19 +235,29 @@ initramfs: user
 	  /etc/motd.txt user/etc/motd.txt
 
 # ---- Disk image (stage 6 + Prompt 4 initramfs) -----------------------------
-image: all initramfs
+# Also builds the Prompt 5 storage/NVMe images so QEMU (run + verify-*) attaches
+# them automatically (the run/verify scripts pick up storage.img/nvme.img from
+# the image directory).
+image: all initramfs storage-image
 	$(call need,$(PY),Install Python 3.)
 	$(PY) tools/build_image.py --bootloader $(BOOTX64) --kernel $(KERNEL) \
 	  --initramfs $(INITRAMFS) --out $(IMAGE)
 
-# ---- Run / debug (stage 5) -------------------------------------------------
-run: image
+# ---- Storage image (Prompt 5: HNXFS in an MBR partition + NVMe scratch) -----
+storage-image: dirs
 	$(call need,$(PY),Install Python 3.)
-	$(PY) tools/run_qemu.py --image $(IMAGE)
+	$(PY) tools/fs/mkhnxfs.py --out $(HNXFS_IMG) --size-mb 8
+	$(PY) tools/disk/mkdisk.py --out $(STORAGE_IMG) --part1 $(HNXFS_IMG) --scratch-mb 1
+	$(PY) tools/disk/mkdisk.py --out $(NVME_IMG) --part1 $(HNXFS_IMG) --scratch-mb 1
 
-debug: image
+# ---- Run / debug (stage 5) -------------------------------------------------
+run: image storage-image
 	$(call need,$(PY),Install Python 3.)
-	$(PY) tools/run_qemu.py --image $(IMAGE) --debug
+	$(PY) tools/run_qemu.py --image $(IMAGE) --storage $(STORAGE_IMG) --nvme $(NVME_IMG)
+
+debug: image storage-image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/run_qemu.py --image $(IMAGE) --storage $(STORAGE_IMG) --nvme $(NVME_IMG) --debug
 
 clean:
 	rm -rf $(B_BOOT)/* $(B_KERN)/* $(B_IMG)/* $(B_USER)/*
@@ -260,7 +299,7 @@ verify-boot: image
 	$(call need,$(PY),Install Python 3.)
 	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name boot --timeout 60 \
 	  --log $(B_IMG)/serial.log \
-	  --expect "MyOS Kernel 0.0.4" \
+	  --expect "MyOS Kernel 0.0.5" \
 	  --expect "[OK] Kernel entered" \
 	  --expect "[OK] GDT loaded" \
 	  --expect "[OK] TSS loaded" \
@@ -423,6 +462,76 @@ verify-prompt4:
 	$(MAKE) verify-shell
 	$(MAKE) verify-user-fault
 	@echo "[OK] verify-prompt4 passed"
+
+# ---- Prompt 5 verification --------------------------------------------------
+verify-pci: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name pci --timeout 90 \
+	  --log $(B_IMG)/pci.log \
+	  --expect "[OK] PCI bus scanned" \
+	  --expect "[PASS] pci enumeration"
+
+verify-block: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name block --timeout 90 \
+	  --log $(B_IMG)/block.log \
+	  --expect "[OK] Block layer online" \
+	  --expect "[PASS] block cache" \
+	  --expect "[PASS] partition parser"
+
+verify-storage: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name storage --timeout 90 \
+	  --log $(B_IMG)/storage.log \
+	  --expect "[OK] AHCI block device online" \
+	  --expect "[PASS] disk read" \
+	  --expect "[PASS] disk write"
+
+verify-hnxfs: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name hnxfs --timeout 90 \
+	  --log $(B_IMG)/hnxfs.log \
+	  --expect "[OK] HNXFS mounted at /disk" \
+	  --expect "[PASS] hnxfs create file" \
+	  --expect "[PASS] hnxfs write file" \
+	  --expect "[PASS] hnxfs read file" \
+	  --expect "[PASS] hnxfs mkdir" \
+	  --expect "[PASS] hnxfs unlink"
+
+verify-keyboard: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name keyboard --timeout 90 \
+	  --log $(B_IMG)/keyboard.log \
+	  --expect "[OK] PS/2 controller online" \
+	  --expect "[OK] Keyboard input online" \
+	  --expect "[PASS] keyboard scripted injection"
+
+verify-tty: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name tty --timeout 90 \
+	  --log $(B_IMG)/tty.log \
+	  --expect "[OK] TTY interactive input online" \
+	  --expect "[PASS] tty canonical input" \
+	  --expect "[PASS] shell interactive smoke"
+
+verify-expanded-userland: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name expanded --timeout 90 \
+	  --log $(B_IMG)/expanded.log \
+	  --expect "[PASS] expanded coreutils" \
+	  --expect "[PASS] storage user programs"
+
+verify-prompt5:
+	$(MAKE) verify-prompt4
+	$(MAKE) verify-pci
+	$(MAKE) verify-block
+	$(MAKE) verify-storage
+	$(MAKE) verify-hnxfs
+	$(MAKE) verify-keyboard
+	$(MAKE) verify-tty
+	$(MAKE) verify-expanded-userland
+	$(MAKE) verify-qemu-matrix
+	@echo "[OK] verify-prompt5 passed"
 
 # ---- Memory-size matrix ----------------------------------------------------
 verify-qemu-matrix: image

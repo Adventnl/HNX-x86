@@ -9,6 +9,7 @@
 #include "fd_table.h"
 #include "user_address_space.h"
 #include "user_copy.h"
+#include "thread.h"
 #include "sleep.h"
 #include "syscall_numbers.h"
 
@@ -40,6 +41,7 @@ int process_wait(uint64_t pid, int64_t *exit_code) {
         fd_table_destroy(child->fds);
         child->fds = NULL;
     }
+    thread_reap(child->main_thread);     /* recycle the 16 KiB kernel stack */
     process_table_free(child);
     user_restore_cr3(saved);
 

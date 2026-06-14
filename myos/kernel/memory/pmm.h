@@ -54,6 +54,12 @@ void     pmm_init(const struct boot_info *boot_info);
 uint64_t pmm_alloc_page(void);
 void     pmm_free_page(uint64_t physical_address);
 
+/* Allocate `count` physically-contiguous 4 KiB pages (for DMA: command lists,
+ * FIS areas, PRDTs, bounce buffers). Returns the base physical address (also
+ * the identity-mapped virtual address) or PMM_INVALID_PAGE. */
+uint64_t pmm_alloc_contig(uint64_t count);
+void     pmm_free_contig(uint64_t physical_address, uint64_t count);
+
 uint64_t pmm_total_pages(void);
 uint64_t pmm_free_pages(void);
 uint64_t pmm_used_pages(void);

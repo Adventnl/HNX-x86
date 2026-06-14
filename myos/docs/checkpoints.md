@@ -376,8 +376,51 @@ marks the process `FAULTED`, and reschedules. CPL-0 faults keep the fatal path.
 | `make verify-user-fault` | `[OK] User fault isolated` + `[OK] Userland foundation tests passed` |
 | `make verify-prompt4` | all Prompt 3 targets + all of the above |
 
-## Next milestone (after Prompt 4)
-**Prompt 5 — storage and device expansion mega-phase:** PCI device manager,
-AHCI/NVMe block devices, block cache, a simple persistent filesystem, expanded
-VFS, PS/2 keyboard, real TTY input, an interactive shell, more coreutils, and a
-driver verification matrix.
+## Prompt 5 — storage and device expansion mega-phase
+
+The first serious hardware/storage/input layer (`MyOS Kernel 0.0.5`).
+
+| Subsystem | Where |
+|-----------|-------|
+| Driver core | `kernel/driver/{driver,device_id,driver_registry}.{c,h}` |
+| PCI (CF8/CFC) | `kernel/pci/{pci,pci_config,pci_device,pci_ids,pci_driver}.{c,h}` |
+| Block + write-through cache | `kernel/block/{block_device,block_request,block_cache,block_registry}.{c,h}` |
+| Partition (MBR/GPT) | `kernel/partition/{mbr,gpt,partition}.{c,h}` |
+| AHCI (SATA) | `kernel/storage/ahci/{ahci,ahci_controller,ahci_port,ahci_command,ahci_disk}.{c,h}` |
+| NVMe foundation | `kernel/storage/nvme/{nvme,nvme_controller,nvme_queue,nvme_namespace,nvme_block}.{c,h}` |
+| HNXFS persistent FS | `kernel/fs/hnxfs/{hnxfs,hnxfs_format,hnxfs_inode,hnxfs_dir,hnxfs_alloc,hnxfs_file}.*` |
+| I/O APIC routing | `kernel/arch/x86_64/ioapic.{c,h}` |
+| PS/2 + keyboard | `kernel/input/{input_event,input_queue}.* + ps2/* + keyboard/*` |
+| Canonical TTY | `kernel/tty/tty.c` (line discipline) |
+| VFS expansion | `vfs_mkdir/create/unlink/stat + mount introspection`, syscalls 17–22 |
+| PMM contiguous alloc | `pmm_alloc_contig` (DMA) |
+| Thread stack reuse | `thread_reap` (bounds kernel heap across many spawns) |
+| Tools | `tools/disk/*`, `tools/fs/*`, `tools/pci/pci_ids_min.py` |
+
+New syscalls: `SYS_MKDIR 17`, `SYS_UNLINK 18`, `SYS_STAT 19`,
+`SYS_MOUNT_INFO 20`, `SYS_DEVICES 21`, `SYS_BLOCKS 22`.
+
+Details in [prompt5.md](prompt5.md), [pci.md](pci.md), [block.md](block.md),
+[storage.md](storage.md), [hnxfs.md](hnxfs.md), [input.md](input.md),
+[tty.md](tty.md).
+
+### Verification (Prompt 5)
+| Target | Asserts |
+|--------|---------|
+| `verify-pci` | PCI bus scanned; pci enumeration |
+| `verify-block` | block layer online; block cache; partition parser |
+| `verify-storage` | AHCI block device online; disk read; disk write |
+| `verify-hnxfs` | HNXFS mounted; create/write/read/mkdir/unlink |
+| `verify-keyboard` | PS/2 controller; keyboard input; scripted injection |
+| `verify-tty` | TTY interactive input; canonical input; shell interactive smoke |
+| `verify-expanded-userland` | expanded coreutils; storage user programs |
+| `verify-prompt5` | verify-prompt4 + all of the above + verify-qemu-matrix |
+
+AHCI read/write works under QEMU; HNXFS persists through the write-through cache
+to `storage.img`; NVMe is discovered + inspected with block I/O deferred.
+
+## Next milestone (after Prompt 5)
+**Prompt 6 — USB and hardware compatibility mega-phase:** xHCI controller, USB
+device enumeration, USB HID keyboard/mouse, improved input stack, PCI MSI/MSI-X
+foundation, driver power/reset handling, broader hardware compatibility, and
+expanded interactive userland.

@@ -9,8 +9,29 @@
 
 static uint64_t g_next_id = 1;
 
+/* Kernel-stack recycling: the bump heap never frees, so reaped threads' 16 KiB
+ * stacks are pooled here and reused. This bounds stack memory at the concurrent
+ * thread count instead of the total threads created over the boot. */
+#define MAX_FREE_STACKS 64
+static uint64_t *g_free_stacks[MAX_FREE_STACKS];
+static int g_free_stack_count;
+
+static uint64_t *stack_alloc(void) {
+    if (g_free_stack_count > 0) {
+        return g_free_stacks[--g_free_stack_count];
+    }
+    return (uint64_t *)kmalloc(THREAD_KERNEL_STACK_SIZE);
+}
+
+static void stack_release(uint64_t *stack) {
+    if (stack && g_free_stack_count < MAX_FREE_STACKS) {
+        g_free_stacks[g_free_stack_count++] = stack;
+    }
+}
+
 void thread_system_init(void) {
     g_next_id = 1;
+    g_free_stack_count = 0;
 }
 
 void thread_trampoline(void) {
@@ -27,7 +48,7 @@ struct thread *thread_create_raw(const char *name, void (*entry)(void *), void *
     if (!t) {
         return NULL;
     }
-    uint64_t *stack = (uint64_t *)kmalloc(THREAD_KERNEL_STACK_SIZE);
+    uint64_t *stack = stack_alloc();
     if (!stack) {
         return NULL;
     }
@@ -74,6 +95,16 @@ void thread_destroy(struct thread *thread) {
     }
     kfree(thread->kernel_stack_base);   /* no-op under the bump allocator */
     kfree(thread);
+}
+
+/* Recycle a DEAD thread's kernel stack for reuse (called by process reaping). */
+void thread_reap(struct thread *thread) {
+    if (!thread) {
+        return;
+    }
+    stack_release(thread->kernel_stack_base);
+    thread->kernel_stack_base = NULL;
+    /* The small thread struct itself is left to the bump allocator. */
 }
 
 struct thread *thread_current(void) {

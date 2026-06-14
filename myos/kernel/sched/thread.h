@@ -48,6 +48,8 @@ struct thread *thread_create(const char *name, void (*entry)(void *), void *arg)
 struct thread *thread_create_raw(const char *name, void (*entry)(void *), void *arg);
 
 void thread_destroy(struct thread *thread);
+/* Recycle a DEAD thread's kernel stack into the reuse pool. */
+void thread_reap(struct thread *thread);
 struct thread *thread_current(void);
 uint64_t thread_current_id(void);
 void thread_exit(void) __attribute__((noreturn));

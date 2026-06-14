@@ -1,16 +1,39 @@
-/* MyOS shell v0.
+/* MyOS shell.
  *
- * No keyboard yet: the shell drains its scripted command stream from stdin
- * (/dev/console, pre-loaded by the kernel), then executes each line. Builtins
- * (cd/exit) run in-process; everything else is resolved to /bin/<cmd>.hxe and
- * spawned. Prints "[PASS] shell scripted session" when the script ends. */
+ *   shell      scripted mode  : echoes + runs lines until "exit"/EOF,
+ *                               prints "[PASS] shell scripted session".
+ *   shell -i   interactive    : prints a "myos:<cwd>$ " prompt, reads a cooked
+ *                               line (canonical TTY), runs it; prints
+ *                               "[PASS] shell interactive smoke".
+ *
+ * Both read one line at a time from stdin (/dev/console), so the scripted shell
+ * stops at its "exit" and leaves any following lines for the interactive shell.
+ * Builtins (cd/exit) run in-process; other commands resolve to /bin/<cmd>.hxe. */
 #include "stdio.h"
 #include "unistd.h"
 #include "string.h"
 #include "parser.h"
 #include "builtins.h"
 
-static char g_input[4096];
+static int read_line(char *buf, int max) {
+    int n = 0;
+    char c;
+    while (n < max - 1) {
+        long r = read(0, &c, 1);
+        if (r <= 0) {
+            if (n == 0) {
+                return -1;        /* EOF */
+            }
+            break;
+        }
+        if (c == '\n') {
+            break;
+        }
+        buf[n++] = c;
+    }
+    buf[n] = 0;
+    return n;
+}
 
 static void resolve_path(const char *cmd, char *out, unsigned long out_size) {
     if (strchr(cmd, '/')) {
@@ -47,36 +70,38 @@ static void run_line(char *line, int *want_exit) {
     wait_pid(pid, &code);
 }
 
-int main(void) {
-    print("[shell] scripted session start\n");
-
-    /* Drain the entire scripted input up front (so spawned children never race
-     * for the shared console). */
-    long total = 0, n;
-    while (total < (long)sizeof(g_input) - 1 &&
-           (n = read(0, g_input + total, sizeof(g_input) - 1 - total)) > 0) {
-        total += n;
+int main(int argc, char **argv) {
+    int interactive = (argc > 1 && argv[1][0] == '-' && argv[1][1] == 'i');
+    if (!interactive) {
+        print("[shell] scripted session start\n");
+    } else {
+        print("[shell] interactive session start\n");
     }
-    g_input[total] = 0;
 
+    char line[256];
+    char cwd[128];
     int want_exit = 0;
-    char *p = g_input;
-    while (*p && !want_exit) {
-        char *line = p;
-        char *nl = strchr(p, '\n');
-        if (nl) {
-            *nl = 0;
-            p = nl + 1;
-        } else {
-            p += strlen(p);
+    while (!want_exit) {
+        if (interactive) {
+            if (getcwd(cwd, sizeof(cwd)) < 0) {
+                strcpy(cwd, "/");
+            }
+            printf("myos:%s$ ", cwd);
         }
-        if (line[0] == 0) {
+        int n = read_line(line, sizeof(line));
+        if (n < 0) {
+            break;                /* EOF */
+        }
+        if (!interactive) {
+            printf("myos$ %s\n", line);
+        }
+        if (n == 0) {
             continue;
         }
-        printf("myos$ %s\n", line);
         run_line(line, &want_exit);
     }
 
-    print("[PASS] shell scripted session\n");
+    print(interactive ? "[PASS] shell interactive smoke\n"
+                      : "[PASS] shell scripted session\n");
     return 0;
 }

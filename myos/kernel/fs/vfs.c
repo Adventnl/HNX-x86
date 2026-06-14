@@ -102,11 +102,20 @@ int vfs_open(const char *path, int flags) {
         return r;
     }
     struct vnode *vn = vfs_resolve(abs);
+    if (!vn && (flags & O_CREAT)) {
+        if (vfs_create(abs) == 0) {
+            vn = vfs_resolve(abs);
+        }
+    }
     if (!vn) {
         return -SYS_ENOENT;
     }
     if ((flags & O_DIRECTORY) && vn->type != VNODE_DIR) {
         return -SYS_ENOTDIR;
+    }
+    if ((flags & O_TRUNC) && vn->type == VNODE_FILE && vn->fs && vn->fs->lookup) {
+        /* Truncate via a zero-length write semantics is fs-specific; HNXFS files
+         * are overwritten from offset 0 by callers, so this is a no-op here. */
     }
     struct file *f = file_alloc(vn, flags, abs);
     if (!f) {
@@ -207,4 +216,94 @@ int vfs_stat(const char *path, struct stat *out) {
     out->type = (uint32_t)vn->type;
     out->mode = 0;
     return 0;
+}
+
+/* Resolve `path` to its parent directory vnode + final component name. */
+static int resolve_parent(const char *path, struct vnode **dir_out, char *base_out,
+                          uint64_t base_size) {
+    struct process *p = process_current();
+    char abs[VFS_PATH_MAX];
+    int r = path_resolve(p ? process_cwd(p) : "/", path, abs, sizeof(abs));
+    if (r < 0) {
+        return r;
+    }
+    char parent[VFS_PATH_MAX];
+    if (path_parent(abs, parent, sizeof(parent)) < 0) {
+        return -SYS_EINVAL;
+    }
+    const char *base = path_basename(abs);
+    if (base[0] == 0) {
+        return -SYS_EINVAL;          /* cannot mutate the root itself */
+    }
+    strlcpy(base_out, base, base_size);
+    struct vnode *dir = vfs_resolve(parent);
+    if (!dir) {
+        return -SYS_ENOENT;
+    }
+    if (dir->type != VNODE_DIR) {
+        return -SYS_ENOTDIR;
+    }
+    *dir_out = dir;
+    return 0;
+}
+
+static int vfs_make(const char *path, enum vnode_type type) {
+    struct vnode *dir = NULL;
+    char base[VFS_NAME_MAX];
+    int r = resolve_parent(path, &dir, base, sizeof(base));
+    if (r < 0) {
+        return r;
+    }
+    if (!dir->ops || !dir->ops->create) {
+        return -SYS_EPERM;           /* read-only filesystem */
+    }
+    return dir->ops->create(dir, base, type, NULL);
+}
+
+int vfs_mkdir(const char *path) {
+    return vfs_make(path, VNODE_DIR);
+}
+
+int vfs_create(const char *path) {
+    return vfs_make(path, VNODE_FILE);
+}
+
+int vfs_unlink(const char *path) {
+    struct vnode *dir = NULL;
+    char base[VFS_NAME_MAX];
+    int r = resolve_parent(path, &dir, base, sizeof(base));
+    if (r < 0) {
+        return r;
+    }
+    if (!dir->ops || !dir->ops->unlink) {
+        return -SYS_EPERM;
+    }
+    return dir->ops->unlink(dir, base);
+}
+
+int vfs_mount_count(void) {
+    int n = 0;
+    for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
+        if (g_mounts[i].used) {
+            n++;
+        }
+    }
+    return n;
+}
+
+int vfs_mount_info(int index, char *path_out, uint64_t path_size,
+                   char *fs_out, uint64_t fs_size) {
+    int n = 0;
+    for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
+        if (!g_mounts[i].used) {
+            continue;
+        }
+        if (n == index) {
+            strlcpy(path_out, g_mounts[i].path, path_size);
+            strlcpy(fs_out, g_mounts[i].fs->name ? g_mounts[i].fs->name : "?", fs_size);
+            return 0;
+        }
+        n++;
+    }
+    return -1;
 }

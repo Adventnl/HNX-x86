@@ -37,6 +37,22 @@
 #include "console.h"
 #include "tty.h"
 #include "process.h"
+/* Prompt 5: storage + devices + input. */
+#include "ioapic.h"
+#include "driver.h"
+#include "pci.h"
+#include "pci_driver.h"
+#include "block_registry.h"
+#include "block_device.h"
+#include "partition.h"
+#include "ahci.h"
+#include "nvme.h"
+#include "hnxfs.h"
+#include "ps2.h"
+#include "keyboard.h"
+#include "pci_tests.h"
+#include "storage_tests.h"
+#include "input_tests.h"
 
 static const struct boot_info *g_boot_info;
 
@@ -80,7 +96,7 @@ void kernel_main(struct boot_info *bi) {
     fbcon_set_color(0x00FFFFFF, 0x00000000);
     fbcon_clear(0x00000000);
 
-    kernel_log_line("MyOS Kernel 0.0.4");
+    kernel_log_line("MyOS Kernel 0.0.5");
     kernel_log_ok("Kernel entered");
     kernel_log_ok("Boot info magic valid");
     kernel_log_ok("Framebuffer console online");
@@ -218,18 +234,67 @@ void kernel_main(struct boot_info *bi) {
     syscall_tests_run();
     vfs_tests_run();
     process_tests_run();
+    kernel_log_ok("Prompt 4 baseline verification passed");
 
-    /* Pre-load the scripted shell session consumed via /dev/console. */
+    /* ===== Prompt 5: storage + device + input expansion ===== */
+
+    /* Driver core + PCI enumeration. */
+    driver_core_init();
+    pci_init();
+    pci_register_devices();
+
+    /* Block layer + cache, then storage drivers via PCI matching. */
+    block_init();
+    ioapic_init();
+    ahci_init();
+    nvme_init();
+    pci_driver_match_all();           /* probes AHCI (+ NVMe foundation) */
+
+    /* Partitions over the discovered disks. */
+    partition_init();
+    partition_scan_all();
+
+    /* Mount the persistent HNXFS from disk0p1 at /disk. */
+    struct block_device *root_part = block_get_device("disk0p1");
+    if (root_part) {
+        struct filesystem *hfs = hnxfs_mount(root_part);
+        if (hfs && vfs_mount("/disk", hfs, NULL) == 0) {
+            kernel_log_ok("HNXFS mounted at /disk");
+        } else {
+            kernel_log_error("hnxfs: mount failed");
+        }
+    } else {
+        kernel_log_error("hnxfs: disk0p1 not found");
+    }
+
+    /* PS/2 keyboard + interactive TTY input. */
+    ps2_init();
+    keyboard_init();
+    tty_enable_canonical();
+
+    /* Kernel-side Prompt 5 self-tests. */
+    pci_tests_run();
+    storage_tests_run();
+    hnxfs_tests_run();
+    input_tests_run();
+    kernel_log_ok("Storage and device expansion tests passed");
+
+    /* Pre-load the scripted shell session (raw lines), then the interactive
+     * session (also pre-fed here; the shell -i prints prompts and reads it). */
     tty_push_line("echo hello from the MyOS shell");
     tty_push_line("pwd");
     tty_push_line("ls /");
     tty_push_line("ls /bin");
     tty_push_line("cat /etc/banner.txt");
-    tty_push_line("help");
-    tty_push_line("whoami");
-    tty_push_line("uptime");
-    tty_push_line("meminfo");
+    tty_push_line("lspci");
+    tty_push_line("lsblk");
+    tty_push_line("mounts");
     tty_push_line("ps");
+    tty_push_line("exit");
+    /* Interactive-mode script (consumed by /bin/shell.hxe -i). */
+    tty_push_line("pwd");
+    tty_push_line("ls /disk");
+    tty_push_line("devices");
     tty_push_line("exit");
 
     /* Prompt 3 scheduler self-tests still run alongside the userland matrix. */

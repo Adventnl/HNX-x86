@@ -25,8 +25,14 @@
 #define SYS_UPTIME   14
 #define SYS_MEMINFO  15
 #define SYS_PS       16
+#define SYS_MKDIR    17
+#define SYS_UNLINK   18
+#define SYS_STAT     19
+#define SYS_MOUNT_INFO 20
+#define SYS_DEVICES  21
+#define SYS_BLOCKS   22
 
-#define SYS_MAX_NR   17        /* one past the highest valid number */
+#define SYS_MAX_NR   23        /* one past the highest valid number */
 
 /* lseek whence. */
 #define SEEK_SET 0
@@ -38,12 +44,16 @@
 #define O_WRONLY 0x0001
 #define O_RDWR   0x0002
 #define O_DIRECTORY 0x0010
+#define O_CREAT  0x0040
+#define O_TRUNC  0x0200
 
 /* errno values (returned negated). A subset of the POSIX numbers; MyOS does not
  * claim POSIX compatibility, the names just ease future expansion. */
 #define SYS_EPERM         1
 #define SYS_ENOENT        2
 #define SYS_ESRCH         3
+#define SYS_EIO           5    /* low-level I/O error */
+#define SYS_EEXIST       17    /* file already exists */
 #define SYS_EBADF         9
 #define SYS_ECHILD       10
 #define SYS_ENOMEM       12

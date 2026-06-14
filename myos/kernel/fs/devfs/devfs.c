@@ -19,7 +19,7 @@ static int64_t dev_write(struct vnode *vn, const void *buf, uint64_t size, uint6
     (void)offset;
     return char_device_write((struct char_device *)vn->priv, buf, size);
 }
-static const struct vnode_ops dev_ops = { dev_read, dev_write, NULL };
+static const struct vnode_ops dev_ops = { dev_read, dev_write, NULL, NULL, NULL };
 
 /* ---- root directory vnode ops -------------------------------------------- */
 static int dev_root_readdir(struct vnode *vn, uint64_t index, struct dirent *out) {
@@ -33,7 +33,7 @@ static int dev_root_readdir(struct vnode *vn, uint64_t index, struct dirent *out
     out->type = VNODE_CHARDEV;
     return 0;
 }
-static const struct vnode_ops dev_root_ops = { NULL, NULL, dev_root_readdir };
+static const struct vnode_ops dev_root_ops = { NULL, NULL, dev_root_readdir, NULL, NULL };
 
 static struct vnode g_root = { VNODE_DIR, 0, &dev_root_ops, NULL, NULL };
 

@@ -52,8 +52,8 @@ static int ramfs_readdir(struct vnode *vn, uint64_t index, struct dirent *out) {
     return 0;
 }
 
-static const struct vnode_ops ramfs_file_ops = { ramfs_read, ramfs_write, NULL };
-static const struct vnode_ops ramfs_dir_ops  = { NULL, NULL, ramfs_readdir };
+static const struct vnode_ops ramfs_file_ops = { ramfs_read, ramfs_write, NULL, NULL, NULL };
+static const struct vnode_ops ramfs_dir_ops  = { NULL, NULL, ramfs_readdir, NULL, NULL };
 
 /* ---- tree construction --------------------------------------------------- */
 static struct ramfs_node *node_new(const char *name, uint64_t name_len,

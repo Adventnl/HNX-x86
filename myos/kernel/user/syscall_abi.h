@@ -33,4 +33,22 @@ struct sys_ps_entry {
     char               name[32];
 };
 
+struct sys_mount_entry {
+    char path[64];
+    char fs[16];
+};
+
+struct sys_device_entry {
+    char         name[32];
+    unsigned int type;              /* enum device_type */
+    unsigned int _pad;
+};
+
+struct sys_block_entry {
+    char               name[32];
+    unsigned long long sectors;
+    unsigned int       sector_size;
+    unsigned int       _pad;
+};
+
 #endif /* MYOS_SYSCALL_ABI_H */

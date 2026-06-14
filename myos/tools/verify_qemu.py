@@ -33,6 +33,8 @@ def main():
                     help="required serial substring (repeatable)")
     ap.add_argument("--log", default=None, help="captured serial log path")
     ap.add_argument("--test-name", default="verify")
+    ap.add_argument("--storage", default=None, help="AHCI/SATA disk image to attach")
+    ap.add_argument("--nvme", default=None, help="NVMe disk image to attach")
     args = ap.parse_args()
 
     if not os.path.isfile(args.image):
@@ -49,6 +51,16 @@ def main():
     image_dir = os.path.dirname(os.path.abspath(args.image))
     log_path = args.log or os.path.join(image_dir, "%s.log" % args.test_name)
 
+    # Auto-attach storage/NVMe images sitting next to myos.img if not specified.
+    if not args.storage:
+        cand = os.path.join(image_dir, "storage.img")
+        if os.path.isfile(cand):
+            args.storage = cand
+    if not args.nvme:
+        cand = os.path.join(image_dir, "nvme.img")
+        if os.path.isfile(cand):
+            args.nvme = cand
+
     cmd = [
         QEMU, "-machine", "q35", "-m", args.mem,
         "-drive", "if=pflash,format=raw,unit=0,readonly=on,file=%s" % code,
@@ -59,6 +71,20 @@ def main():
         cmd += ["-drive", "if=pflash,format=raw,unit=1,file=%s" % vars_copy]
     cmd += [
         "-drive", "format=raw,file=%s" % args.image,
+    ]
+    # Attach a SATA disk on a dedicated AHCI controller (deterministic bus name).
+    if args.storage and os.path.isfile(args.storage):
+        cmd += [
+            "-device", "ich9-ahci,id=ahci0",
+            "-drive", "id=hd0,if=none,format=raw,file=%s" % args.storage,
+            "-device", "ide-hd,drive=hd0,bus=ahci0.0",
+        ]
+    if args.nvme and os.path.isfile(args.nvme):
+        cmd += [
+            "-drive", "id=nvm0,if=none,format=raw,file=%s" % args.nvme,
+            "-device", "nvme,serial=hnxnvme,drive=nvm0",
+        ]
+    cmd += [
         "-serial", "stdio",
         "-display", "none",
         "-net", "none",

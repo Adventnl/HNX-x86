@@ -216,3 +216,41 @@ coreutils. `fault_test` dereferences an unmapped ring-3 address;
 (`[OK] User fault isolated`), terminates that process and reschedules — the
 kernel survives. The supervisor reaps init and prints
 `[OK] Userland foundation tests passed`.
+
+## Storage + devices + input (Prompt 5)
+
+`MyOS Kernel 0.0.5`. After the Prompt 4 baseline marker, `kernel_main` brings up
+the hardware layer (all with the kernel CR3 active):
+
+```
+driver_core_init()             [OK] Driver core online
+pci_init() + pci_register_devices()   CF8/CFC scan -> [OK] PCI bus scanned
+block_init()                   block registry + cache -> [OK] Block layer / cache online
+ioapic_init()                  map I/O APIC MMIO (route legacy IRQs)
+ahci_init(); nvme_init()       register PCI drivers
+pci_driver_match_all()         probe AHCI -> [OK] AHCI controller found / block device online
+                               probe NVMe -> CAP/VS/CSTS, [WARN] NVMe block I/O deferred
+partition_init(); partition_scan_all()   MBR/GPT -> disk0p1, disk0p2
+hnxfs_mount(disk0p1) + vfs_mount("/disk")  [OK] HNXFS mounted at /disk
+ps2_init(); keyboard_init(); tty_enable_canonical()
+                               [OK] PS/2 controller / Keyboard input / TTY interactive input online
+pci_tests / storage_tests / hnxfs_tests / input_tests run their [PASS] markers
+                               [OK] Storage and device expansion tests passed
+```
+
+Then the Prompt 4 userland launches (scheduler_tests_start + supervisor spawns
+`/bin/init.hxe`). init additionally runs the expanded-coreutils smoke, the
+storage user tests (`storage_test`, `fs_test`, `disk_test`, `cache_test`), and
+both shell modes — `/bin/shell.hxe` (scripted) and `/bin/shell.hxe -i`
+(interactive). QEMU attaches the SATA disk (`storage.img` via `ich9-ahci`) and an
+NVMe disk (`nvme.img`); the run/verify scripts auto-attach them from the image
+directory.
+
+### CR3 note for storage syscalls
+
+A user `read`/`write` of a `/disk` file enters the kernel under the process CR3.
+The AHCI transfer (`ahci_disk.c`) brackets its ABAR MMIO + DMA bounce-buffer
+access with the kernel CR3 (poll-only, non-blocking), so the controller and DMA
+frames — which live outside the user CR3's mirror — are reachable. HNXFS/block
+metadata buffers live in the kernel image + heap (< 4 MiB), mirrored in every
+user CR3, so the rest of the path needs no switch.

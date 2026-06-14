@@ -14,6 +14,8 @@
 #include "vfs.h"
 #include "path.h"
 #include "inode.h"
+#include "driver_registry.h"
+#include "block_registry.h"
 #include "idt.h"
 #include "gdt.h"
 #include "scheduler.h"
@@ -266,6 +268,119 @@ int64_t sys_ps(struct syscall_frame *f) {
         }
     }
     return n;
+}
+
+/* ---- namespace + storage introspection (Prompt 5) ------------------------ */
+int64_t sys_mkdir(struct syscall_frame *f) {
+    char *path = user_copy_string_from_user(f->rdi, VFS_PATH_MAX);
+    if (!path) {
+        return -SYS_EFAULT;
+    }
+    int64_t r = vfs_mkdir(path);
+    kfree(path);
+    return r;
+}
+
+int64_t sys_unlink(struct syscall_frame *f) {
+    char *path = user_copy_string_from_user(f->rdi, VFS_PATH_MAX);
+    if (!path) {
+        return -SYS_EFAULT;
+    }
+    int64_t r = vfs_unlink(path);
+    kfree(path);
+    return r;
+}
+
+int64_t sys_stat(struct syscall_frame *f) {
+    char *path = user_copy_string_from_user(f->rdi, VFS_PATH_MAX);
+    if (!path) {
+        return -SYS_EFAULT;
+    }
+    struct stat st;
+    int r = vfs_stat(path, &st);
+    kfree(path);
+    if (r < 0) {
+        return r;
+    }
+    struct sys_stat out;
+    out.size = st.size;
+    out.type = st.type;
+    out.mode = st.mode;
+    if (user_copy_to_user(f->rsi, &out, sizeof(out)) < 0) {
+        return -SYS_EFAULT;
+    }
+    return 0;
+}
+
+int64_t sys_mount_info(struct syscall_frame *f) {
+    int max = (int)f->rsi;
+    if (max <= 0) {
+        return 0;
+    }
+    int total = vfs_mount_count();
+    if (max > total) {
+        max = total;
+    }
+    for (int i = 0; i < max; i++) {
+        struct sys_mount_entry e;
+        memset(&e, 0, sizeof(e));
+        vfs_mount_info(i, e.path, sizeof(e.path), e.fs, sizeof(e.fs));
+        if (user_copy_to_user(f->rdi + (uint64_t)i * sizeof(e), &e, sizeof(e)) < 0) {
+            return -SYS_EFAULT;
+        }
+    }
+    return max;
+}
+
+int64_t sys_devices(struct syscall_frame *f) {
+    int max = (int)f->rsi;
+    if (max <= 0) {
+        return 0;
+    }
+    int total = device_count();
+    if (max > total) {
+        max = total;
+    }
+    for (int i = 0; i < max; i++) {
+        struct device *d = device_at(i);
+        if (!d) {
+            break;
+        }
+        struct sys_device_entry e;
+        memset(&e, 0, sizeof(e));
+        strlcpy(e.name, d->name, sizeof(e.name));
+        e.type = (uint32_t)d->type;
+        if (user_copy_to_user(f->rdi + (uint64_t)i * sizeof(e), &e, sizeof(e)) < 0) {
+            return -SYS_EFAULT;
+        }
+    }
+    return max;
+}
+
+int64_t sys_blocks(struct syscall_frame *f) {
+    int max = (int)f->rsi;
+    if (max <= 0) {
+        return 0;
+    }
+    int total = block_device_count();
+    if (max > total) {
+        max = total;
+    }
+    for (int i = 0; i < max; i++) {
+        struct block_device *b = block_device_at(i);
+        if (!b) {
+            break;
+        }
+        struct sys_block_entry e;
+        memset(&e, 0, sizeof(e));
+        strlcpy(e.name, b->name, sizeof(e.name));
+        e.sectors = b->sector_count;
+        e.sector_size = b->sector_size;
+        if (user_copy_to_user(f->rdi + (uint64_t)i * sizeof(e), &e, sizeof(e)) < 0) {
+            return -SYS_EFAULT;
+        }
+    }
+    return max;
 }
 
 /* ---- dispatch ------------------------------------------------------------ */

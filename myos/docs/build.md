@@ -19,8 +19,9 @@ the LLVM linkers (`lld`).
 make all         # build BOOTX64.EFI + kernel.elf
 make bootloader  # build only the EFI application
 make kernel      # build only the kernel ELF
-make user        # build all ring-3 programs (init, shell, 15 coreutils, 5 tests)
+make user        # build all ring-3 programs (init, shell, coreutils, tests)
 make initramfs   # pack build/image/initramfs.hxf (HXF1: /bin /tests /etc)
+make storage-image # build storage.img (MBR: HNXFS p1 + scratch p2) + nvme.img
 make image       # build build/image/myos.img (FAT: BOOTX64.EFI + kernel.elf + initramfs.hxf)
 make run         # boot the image in QEMU + OVMF
 make debug       # same as run but halted with a gdb stub on :1234
@@ -65,6 +66,23 @@ make verify-prompt4     # all Prompt 3 targets + all of the above
 The HXE inspector `tools/inspect_hxe.py <file>` and the initramfs inspector
 `tools/inspect_initramfs.py <archive> [--require <path>]` dump/validate the
 custom formats without booting.
+
+## Storage + device + input verification (Prompt 5)
+```bash
+make storage-image          # build storage.img (HNXFS) + nvme.img
+make verify-pci             # PCI bus scanned + pci enumeration
+make verify-block           # block layer online + block cache + partition parser
+make verify-storage         # AHCI block device online + disk read + disk write
+make verify-hnxfs           # HNXFS mounted + create/write/read/mkdir/unlink
+make verify-keyboard        # PS/2 controller + keyboard input + scripted injection
+make verify-tty             # TTY interactive input + canonical input + shell smoke
+make verify-expanded-userland  # expanded coreutils + storage user programs
+make verify-prompt5         # verify-prompt4 + all of the above + qemu-matrix
+```
+QEMU automatically attaches `build/image/storage.img` (SATA via `ich9-ahci`) and
+`build/image/nvme.img` (NVMe) when they sit next to `myos.img`; `make image`
+builds them. Disk/FS inspectors: `tools/disk/inspect_disk.py`,
+`tools/fs/inspect_hnxfs.py`, `tools/pci/pci_ids_min.py`.
 
 ### User-program compiler flags (ring 3, freestanding)
 ```

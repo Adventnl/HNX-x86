@@ -21,6 +21,8 @@ def main():
     ap.add_argument("--headless", action="store_true",
                     help="no graphical window (-display none); serial still on stdio")
     ap.add_argument("--mem", default="256M")
+    ap.add_argument("--storage", default=None, help="AHCI/SATA disk image")
+    ap.add_argument("--nvme", default=None, help="NVMe disk image")
     args = ap.parse_args()
 
     if not os.path.isfile(args.image):
@@ -42,6 +44,16 @@ def main():
         find_ovmf.main()
         return 1
 
+    image_dir = os.path.dirname(os.path.abspath(args.image))
+    if not args.storage:
+        cand = os.path.join(image_dir, "storage.img")
+        if os.path.isfile(cand):
+            args.storage = cand
+    if not args.nvme:
+        cand = os.path.join(image_dir, "nvme.img")
+        if os.path.isfile(cand):
+            args.nvme = cand
+
     cmd = [
         QEMU,
         "-machine", "q35",
@@ -60,6 +72,19 @@ def main():
     qemu_log = os.path.join(os.path.dirname(os.path.abspath(args.image)), "qemu.log")
     cmd += [
         "-drive", "format=raw,file=%s" % args.image,
+    ]
+    if args.storage and os.path.isfile(args.storage):
+        cmd += [
+            "-device", "ich9-ahci,id=ahci0",
+            "-drive", "id=hd0,if=none,format=raw,file=%s" % args.storage,
+            "-device", "ide-hd,drive=hd0,bus=ahci0.0",
+        ]
+    if args.nvme and os.path.isfile(args.nvme):
+        cmd += [
+            "-drive", "id=nvm0,if=none,format=raw,file=%s" % args.nvme,
+            "-device", "nvme,serial=hnxnvme,drive=nvm0",
+        ]
+    cmd += [
         "-serial", "stdio",
         "-net", "none",
         "-no-reboot",

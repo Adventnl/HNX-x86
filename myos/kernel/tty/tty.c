@@ -5,14 +5,20 @@
 #include "log.h"
 
 #define TTY_INPUT_CAPACITY 4096
+#define TTY_LINE_MAX 256
 
 static char     g_input[TTY_INPUT_CAPACITY];
 static uint64_t g_input_len;       /* bytes written into the buffer */
 static uint64_t g_input_pos;       /* read cursor */
 
+/* Canonical line-editing buffer (assembled from keyboard input). */
+static char     g_line[TTY_LINE_MAX];
+static uint64_t g_line_len;
+
 void tty_init(void) {
     g_input_len = 0;
     g_input_pos = 0;
+    g_line_len = 0;
     kernel_log_ok("TTY layer online");
 }
 
@@ -39,6 +45,39 @@ int64_t tty_read(void *buf, uint64_t size) {
 }
 
 void tty_write(const char *buf, uint64_t len) {
-    /* Line-discipline placeholder: no echo/cooking yet, straight to console. */
     console_write(buf, len);
+}
+
+/* Canonical (cooked) input: echo, backspace editing, line submission on Enter. */
+void tty_input_char(char c) {
+    if (c == '\n' || c == '\r') {
+        tty_push_input(g_line, g_line_len);
+        tty_push_input("\n", 1);
+        console_putc('\n');
+        g_line_len = 0;
+        return;
+    }
+    if (c == '\b' || c == 0x7F) {
+        if (g_line_len > 0) {
+            g_line_len--;
+            console_putc('\b');
+            console_putc(' ');
+            console_putc('\b');
+        }
+        return;
+    }
+    if (g_line_len < TTY_LINE_MAX - 1) {
+        g_line[g_line_len++] = c;
+        console_putc(c);   /* echo */
+    }
+}
+
+void tty_reset_input(void) {
+    g_input_len = 0;
+    g_input_pos = 0;
+    g_line_len = 0;
+}
+
+void tty_enable_canonical(void) {
+    kernel_log_ok("TTY interactive input online");
 }

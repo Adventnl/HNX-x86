@@ -19,19 +19,23 @@ myos/
 ├── kernel/          ELF64 kernel
 │   ├── initramfs/   HXF1 archive parser
 │   ├── user/        ring-3 entry, syscalls, address spaces, HXE1 loader, copy
-│   ├── fs/          VFS core + ramfs/ + devfs/
+│   ├── fs/          VFS core + ramfs/ + devfs/ + hnxfs/ (persistent FS)
 │   ├── device/      device registry + char devices (null/zero)
-│   ├── tty/         /dev/console + TTY v0
-│   └── process/     process model, process table, fd table, exec, wait
+│   ├── tty/         /dev/console + TTY (canonical input)
+│   ├── process/     process model, process table, fd table, exec, wait
+│   ├── driver/      driver core (driver/device/registry)
+│   ├── pci/         PCI config + enumeration + driver matching
+│   ├── block/       block device + request + write-through cache + registry
+│   ├── partition/   MBR + GPT parsers
+│   ├── storage/     ahci/ (SATA) + nvme/ (foundation)
+│   └── input/       input event/queue + ps2/ + keyboard/
 ├── user/            ring-3 userland (no host libc)
-│   ├── include/     user headers (types/syscall/unistd/fcntl/stdio/string/stdlib)
-│   ├── lib/         crt0 + runtime (syscall/unistd/stdio/string/stdlib/malloc)
-│   ├── init/        init (PID 1)
-│   ├── shell/       shell + parser + builtins
-│   ├── coreutils/   echo cat ls pwd clear help true false yes whoami …
-│   ├── tests/       syscall/fd/vfs/spawn/fault tests
-│   └── etc/         banner.txt / motd.txt
-├── tools/           build_image / find_ovmf / run_qemu / mkhxe / mkinitramfs / inspect_*
+│   ├── include/lib/ headers + runtime (crt0/syscall/unistd/stdio/string/stdlib/malloc)
+│   ├── init/ shell/ coreutils/ tests/ storage/ etc/
+├── tools/           build_image / find_ovmf / run_qemu / mkhxe / mkinitramfs
+│   ├── disk/        mkdisk / inspect_disk
+│   ├── fs/          mkhnxfs / inspect_hnxfs
+│   └── pci/         pci_ids_min
 └── build/           generated artifacts
 ```
 
@@ -86,6 +90,16 @@ Implemented:
   `/bin/init.hxe` (PID 1) runs five user tests, then a **scripted shell** that
   spawns 15 **coreutils**. Ring-3 faults are **isolated** (the process dies, the
   kernel survives). Boots to `MyOS Kernel 0.0.4`.
+- **Prompt 5 (storage + device + input mega-phase):** a **driver core** +
+  **PCI** enumeration (CF8/CFC), a **block layer** with a write-through cache,
+  **MBR/GPT** partitioning, an **AHCI** SATA driver (real READ/WRITE DMA EXT
+  under QEMU), an **NVMe** foundation (discovery + CAP/VS/CSTS; block I/O
+  deferred), a custom persistent filesystem **HNXFS1** mounted at `/disk`
+  (create/write/read/mkdir/unlink, write-through to disk), an expanded **VFS**
+  (mkdir/unlink/create/stat + 6 new syscalls), a **PS/2 keyboard** routed via the
+  **I/O APIC** with a canonical **TTY** line discipline, an **interactive shell**
+  mode, and ~14 new coreutils (mkdir/rm/touch/writefile/readfile/hexdump/stat/
+  mounts/devices/blocks/lspci/lsblk/…). Boots to `MyOS Kernel 0.0.5`.
 
 ### What is tested how
 - **Tested by normal boot** (`make verify-boot`): bootloader, serial, logging,
@@ -106,9 +120,13 @@ Implemented:
   (`[PASS] spawn_test`), `verify-shell` (`[PASS] shell scripted session`),
   `verify-user-fault` (a deliberate ring-3 page fault is isolated). `make
   verify-prompt4` runs the whole chain.
-- **Not yet implemented (Prompt 5+):** persistent disk filesystem, AHCI/NVMe,
-  PCI drivers, USB, keyboard/real TTY input, networking, GUI, SMP, signals,
-  fork, dynamic linking, in-kernel ELF user loader, broad POSIX compatibility.
+- **Tested by the storage/device/input targets:** `verify-pci`, `verify-block`,
+  `verify-storage` (AHCI disk read/write), `verify-hnxfs` (persistent FS),
+  `verify-keyboard`, `verify-tty` (canonical input + interactive shell),
+  `verify-expanded-userland`. `make verify-prompt5` runs the whole chain.
+- **Not yet implemented (Prompt 6+):** USB/xHCI, USB HID, networking, GUI,
+  audio, SMP, journaling FS, full permissions, dynamic linker, package manager.
+  NVMe block I/O is a documented foundation (deferred).
 - **Intentionally deferred:** `kfree` reclamation (bump allocator no-op; user
   memory *is* reclaimed on process reap via the PMM), dead-thread stack
   reclamation, BootServices memory reclaim, I/O APIC programming (the LAPIC
@@ -125,7 +143,12 @@ The kernel's large `.bss` (stacks + 2 MiB heap arena) is `NOBITS` — zero bytes
 on disk, reserved only at load — so the on-disk kernel stays small while the
 mapped footprint stays below `USER_IMAGE_BASE` (4 MiB).
 
-Next milestone: **Prompt 5 — storage and device expansion mega-phase** (PCI
+Next milestone: **Prompt 6 — USB and hardware compatibility mega-phase** (xHCI
+controller, USB device enumeration, USB HID keyboard/mouse, improved input stack,
+PCI MSI/MSI-X foundation, driver power/reset handling, broader hardware
+compatibility, and expanded interactive userland).
+
+Previously: **Prompt 5 — storage and device expansion mega-phase** (PCI
 device manager, AHCI/NVMe block devices, block cache, a simple persistent
 filesystem, expanded VFS, PS/2 keyboard, real TTY input, an interactive shell,
 more coreutils, and a driver verification matrix).

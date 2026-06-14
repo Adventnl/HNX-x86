@@ -158,6 +158,37 @@ uint64_t pmm_alloc_page(void) {
     return PMM_INVALID_PAGE;   /* out of memory */
 }
 
+uint64_t pmm_alloc_contig(uint64_t count) {
+    if (count == 0) {
+        return PMM_INVALID_PAGE;
+    }
+    if (count == 1) {
+        return pmm_alloc_page();
+    }
+    uint64_t start = LOW_MEMORY_RESERVED_END >> PAGE_SHIFT;
+    for (uint64_t p = start; p + count <= g_total_pages; p++) {
+        uint64_t run = 0;
+        while (run < count && !bit_test(p + run)) {
+            run++;
+        }
+        if (run == count) {
+            for (uint64_t i = 0; i < count; i++) {
+                bit_set(p + i);
+            }
+            g_free_pages -= count;
+            return p << PAGE_SHIFT;
+        }
+        p += run;   /* skip the used page that broke the run */
+    }
+    return PMM_INVALID_PAGE;
+}
+
+void pmm_free_contig(uint64_t physical_address, uint64_t count) {
+    for (uint64_t i = 0; i < count; i++) {
+        pmm_free_page(physical_address + i * PAGE_SIZE);
+    }
+}
+
 void pmm_free_page(uint64_t physical_address) {
     if (physical_address == 0 || (physical_address & PAGE_MASK)) {
         kernel_panic_hex("pmm: invalid free", physical_address);
