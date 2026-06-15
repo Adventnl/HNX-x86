@@ -13,6 +13,7 @@
 #include "vmm.h"
 #include "heap.h"
 #include "early_tests.h"
+#include "kernel_core_tests.h"
 #include "pic.h"
 #include "madt.h"
 #include "apic.h"
@@ -53,6 +54,7 @@
 #include "pci_tests.h"
 #include "storage_tests.h"
 #include "input_tests.h"
+#include "fs_ext_tests.h"
 /* Prompt 6: USB + hardware compatibility. */
 #include "msi.h"
 #include "msi_tests.h"
@@ -67,6 +69,12 @@
 #include "hid_input.h"
 #include "hid_tests.h"
 #include "input_compat_tests.h"
+/* Production Overhaul Phase 1 — Work Unit F: networking. */
+#include "net.h"
+/* Work Unit D/E/H: storage/driver, USB/input, test infrastructure expansion. */
+#include "storage_ext_tests.h"
+#include "usb_ext_tests.h"
+#include "stress_tests.h"
 
 static const struct boot_info *g_boot_info;
 
@@ -167,6 +175,12 @@ void kernel_main(struct boot_info *bi) {
     kernel_log_ok("Kernel heap online");
     heap_dump_stats();
 
+    /* --- Production Overhaul Phase 1: kernel core foundation ---
+     * Slab allocator, kernel object model, debug/trace framework. Brought up
+     * right after the heap so every later subsystem can use kmem_alloc, the
+     * object registry and the tracing/dump infrastructure. */
+    kernel_core_init();
+
     /* --- Destructive verification hooks (test builds only) --- */
     run_destructive_tests();
 
@@ -174,6 +188,9 @@ void kernel_main(struct boot_info *bi) {
     early_tests_run();
     kernel_log_ok("Early kernel tests passed");
     kernel_log_ok("Prompt 2.5 baseline verification passed");
+
+    /* --- Work Unit A: kernel core production test matrix --- */
+    kernel_core_tests_run();
 
     /* ===== Prompt 3: interrupts + timers + scheduler ===== */
 
@@ -294,6 +311,21 @@ void kernel_main(struct boot_info *bi) {
     kernel_log_ok("Storage and device expansion tests passed");
     kernel_log_ok("Prompt 5 baseline verification passed");
 
+    /* Work Unit C: VFS/HNXFS/cache expansion (dentry cache, page/buffer cache,
+     * rename/link/append/truncate/large file, hnxfs fsck, fs stress). Runs after
+     * the HNXFS mount so the file tests have a writable filesystem. */
+    fs_ext_init();
+    fs_ext_tests_run();
+
+    /* Work Unit D: storage/driver expansion (AHCI multi-sector + error paths,
+     * PCI caps, MSI, block stats + async foundation, NVMe identify/deferral). */
+    storage_ext_tests_run();
+
+    /* Work Unit F: networking foundation (loopback + protocol stack + e1000
+     * probe). Runs after the slab allocator, PCI and VMM are up. */
+    net_init();
+    net_tests_run();
+
     /* ===== Prompt 6: USB + hardware compatibility ===== */
 
     /* PCI capability parsing + MSI/MSI-X foundation. */
@@ -324,6 +356,13 @@ void kernel_main(struct boot_info *bi) {
     input_compat_tests_run();
     kernel_log_ok("USB and hardware compatibility tests passed");
 
+    /* Work Unit E: USB/input expansion tests (xHCI rings/commands, USB
+     * enumeration/descriptors, HID parser, unified input, TTY from both stacks). */
+    usb_ext_tests_run();
+
+    /* Work Unit H: kernel test infrastructure + fuzz/stress + corpus suites. */
+    test_infra_run();
+
     /* Pre-load the scripted shell session (raw lines), then the interactive
      * session (also pre-fed here; the shell -i prints prompts and reads it). */
     tty_push_line("echo hello from the MyOS shell");
@@ -335,6 +374,10 @@ void kernel_main(struct boot_info *bi) {
     tty_push_line("lsblk");
     tty_push_line("mounts");
     tty_push_line("ps");
+    tty_push_line("set GREETING hello");   /* exercises the expanded shell */
+    tty_push_line("which ls");
+    tty_push_line("history");
+    tty_push_line("selftest");             /* prints [PASS] shell expanded tests */
     tty_push_line("exit");
     /* Interactive-mode script (consumed by /bin/shell.hxe -i). */
     tty_push_line("pwd");

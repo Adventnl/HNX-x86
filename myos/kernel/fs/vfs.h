@@ -41,6 +41,12 @@ int     vfs_mkdir(const char *path);
 int     vfs_create(const char *path);
 int     vfs_unlink(const char *path);
 
+/* Extended operations (kernel/fs/vfs_ops.c). rename/link are content-copy
+ * foundations over the vnode primitives; truncate shrinks or zero-extends. */
+int     vfs_rename(const char *oldpath, const char *newpath);
+int     vfs_link(const char *oldpath, const char *newpath);
+int     vfs_truncate(const char *path, uint64_t length);
+
 /* Mount table introspection (for the `mounts` coreutil). */
 int     vfs_mount_count(void);
 int     vfs_mount_info(int index, char *path_out, uint64_t path_size,

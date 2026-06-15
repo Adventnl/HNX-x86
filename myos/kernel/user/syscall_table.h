@@ -44,4 +44,34 @@ int64_t sys_input_poll(struct syscall_frame *f);
 int64_t sys_mouse_poll(struct syscall_frame *f);
 int64_t sys_msi_info(struct syscall_frame *f);
 
+/* Work Unit B: process / credentials / time / fd / memory (syscall_proc.c). */
+int64_t sys_getppid(struct syscall_frame *f);
+int64_t sys_gettid(struct syscall_frame *f);
+int64_t sys_getuid(struct syscall_frame *f);
+int64_t sys_setuid(struct syscall_frame *f);
+int64_t sys_getgid(struct syscall_frame *f);
+int64_t sys_setgid(struct syscall_frame *f);
+int64_t sys_getpriority(struct syscall_frame *f);
+int64_t sys_setpriority(struct syscall_frame *f);
+int64_t sys_brk(struct syscall_frame *f);
+int64_t sys_sbrk(struct syscall_frame *f);
+int64_t sys_mmap(struct syscall_frame *f);
+int64_t sys_munmap(struct syscall_frame *f);
+int64_t sys_dup(struct syscall_frame *f);
+int64_t sys_dup2(struct syscall_frame *f);
+int64_t sys_pipe(struct syscall_frame *f);
+int64_t sys_fcntl(struct syscall_frame *f);
+int64_t sys_ioctl(struct syscall_frame *f);
+int64_t sys_waitpid(struct syscall_frame *f);
+int64_t sys_kill(struct syscall_frame *f);
+int64_t sys_gettimeofday(struct syscall_frame *f);
+int64_t sys_clock_gettime(struct syscall_frame *f);
+int64_t sys_nanosleep(struct syscall_frame *f);
+int64_t sys_getpgid(struct syscall_frame *f);
+int64_t sys_setpgid(struct syscall_frame *f);
+int64_t sys_getsid(struct syscall_frame *f);
+int64_t sys_setsid(struct syscall_frame *f);
+int64_t sys_env_get(struct syscall_frame *f);
+int64_t sys_env_set(struct syscall_frame *f);
+
 #endif /* MYOS_SYSCALL_TABLE_H */

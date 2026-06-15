@@ -12,6 +12,14 @@
 #   MYOS_TEST_VERBOSE         extra diagnostic logging
 
 # ---- Toolchain -------------------------------------------------------------
+# On Windows the LLVM and QEMU installers do not put their bin/ dirs on PATH for
+# non-interactive shells; prepend the standard install locations if present so
+# `clang`, `lld-link`, `ld.lld` and `qemu-system-x86_64` resolve. Harmless on
+# macOS/Linux (the dirs simply don't exist and PATH lookup falls through).
+ifneq ($(wildcard /c/Program Files/LLVM/bin/clang.exe),)
+export PATH := /c/Program Files/LLVM/bin:/c/Program Files/qemu:$(PATH)
+endif
+
 CC        := clang
 LD_EFI    := lld-link
 LD_KERNEL := ld.lld
@@ -38,18 +46,10 @@ BOOT_CFLAGS := --target=x86_64-unknown-windows -ffreestanding -fshort-wchar \
                -Ibootloader/include -Ishared/include
 BOOT_LDFLAGS := /subsystem:efi_application /entry:EfiMain /nodefaultlib
 
-KERN_INCLUDES := -Ikernel/include -Ikernel/arch/x86_64 -Ikernel/memory \
-                 -Ikernel/sched -Ikernel/tests -Ikernel/initramfs \
-                 -Ikernel/user -Ikernel/fs -Ikernel/fs/ramfs -Ikernel/fs/devfs \
-                 -Ikernel/fs/hnxfs -Ikernel/device -Ikernel/tty -Ikernel/process \
-                 -Ikernel/driver -Ikernel/pci -Ikernel/block -Ikernel/partition \
-                 -Ikernel/storage -Ikernel/storage/ahci -Ikernel/storage/nvme \
-                 -Ikernel/input -Ikernel/input/ps2 -Ikernel/input/keyboard \
-                 -Ikernel/input/mouse -Ikernel/input/hid \
-                 -Ikernel/msi -Ikernel/hw -Ikernel/hw/events -Ikernel/hw/power \
-                 -Ikernel/hw/diagnostics \
-                 -Ikernel/usb -Ikernel/usb/core -Ikernel/usb/xhci -Ikernel/usb/hid \
-                 -Ishared/include
+# Every directory under kernel/ is an include root (header basenames are unique
+# across the tree). Discovered with find so new subsystems need no Makefile edit.
+KERN_DIRS     := $(shell find kernel -type d)
+KERN_INCLUDES := $(addprefix -I,$(KERN_DIRS)) -Ishared/include
 # EXTRA_KCFLAGS is injected by the verify-* targets to enable destructive tests.
 EXTRA_KCFLAGS ?=
 # -mno-sse/-mno-mmx/-msoft-float: IRQ stubs save only the GPRs, so the kernel
@@ -77,61 +77,16 @@ BOOT_SRC := $(wildcard bootloader/src/*.c)
 BOOT_OBJ := $(patsubst bootloader/src/%.c,$(B_BOOT)/%.obj,$(BOOT_SRC))
 BOOT_HDR := $(wildcard bootloader/include/*.h) shared/include/boot_info.h
 
-# Kernel C/asm sources span src/, arch/x86_64/, memory/, tests/. Object file
-# names are flattened into build/kernel/ (basenames are unique across dirs).
-KERN_CSRC := $(wildcard kernel/src/*.c) $(wildcard kernel/arch/x86_64/*.c) \
-             $(wildcard kernel/memory/*.c) $(wildcard kernel/sched/*.c) \
-             $(wildcard kernel/tests/*.c) $(wildcard kernel/initramfs/*.c) \
-             $(wildcard kernel/user/*.c) $(wildcard kernel/fs/*.c) \
-             $(wildcard kernel/fs/ramfs/*.c) $(wildcard kernel/fs/devfs/*.c) \
-             $(wildcard kernel/fs/hnxfs/*.c) \
-             $(wildcard kernel/device/*.c) $(wildcard kernel/tty/*.c) \
-             $(wildcard kernel/process/*.c) $(wildcard kernel/driver/*.c) \
-             $(wildcard kernel/pci/*.c) $(wildcard kernel/block/*.c) \
-             $(wildcard kernel/partition/*.c) $(wildcard kernel/storage/*.c) \
-             $(wildcard kernel/storage/ahci/*.c) $(wildcard kernel/storage/nvme/*.c) \
-             $(wildcard kernel/input/*.c) $(wildcard kernel/input/ps2/*.c) \
-             $(wildcard kernel/input/keyboard/*.c) \
-             $(wildcard kernel/input/mouse/*.c) $(wildcard kernel/input/hid/*.c) \
-             $(wildcard kernel/msi/*.c) \
-             $(wildcard kernel/hw/events/*.c) $(wildcard kernel/hw/power/*.c) \
-             $(wildcard kernel/hw/diagnostics/*.c) \
-             $(wildcard kernel/usb/core/*.c) $(wildcard kernel/usb/xhci/*.c) \
-             $(wildcard kernel/usb/hid/*.c)
-KERN_SSRC := $(wildcard kernel/arch/x86_64/*.S) $(wildcard kernel/sched/*.S) \
-             $(wildcard kernel/user/*.S)
+# Kernel C/asm sources are discovered recursively. Object files are flattened
+# into build/kernel/ (basenames are unique across the whole kernel tree).
+KERN_CSRC := $(shell find kernel -name '*.c')
+KERN_SSRC := $(shell find kernel -name '*.S')
 KERN_OBJ  := $(addprefix $(B_KERN)/,$(notdir $(KERN_CSRC:.c=.o))) \
              $(addprefix $(B_KERN)/,$(notdir $(KERN_SSRC:.S=.o)))
-KERN_HDR  := $(wildcard kernel/include/*.h) $(wildcard kernel/arch/x86_64/*.h) \
-             $(wildcard kernel/memory/*.h) $(wildcard kernel/sched/*.h) \
-             $(wildcard kernel/tests/*.h) $(wildcard kernel/initramfs/*.h) \
-             $(wildcard kernel/user/*.h) $(wildcard kernel/fs/*.h) \
-             $(wildcard kernel/fs/ramfs/*.h) $(wildcard kernel/fs/devfs/*.h) \
-             $(wildcard kernel/fs/hnxfs/*.h) \
-             $(wildcard kernel/device/*.h) $(wildcard kernel/tty/*.h) \
-             $(wildcard kernel/process/*.h) $(wildcard kernel/driver/*.h) \
-             $(wildcard kernel/pci/*.h) $(wildcard kernel/block/*.h) \
-             $(wildcard kernel/partition/*.h) $(wildcard kernel/storage/*.h) \
-             $(wildcard kernel/storage/ahci/*.h) $(wildcard kernel/storage/nvme/*.h) \
-             $(wildcard kernel/input/*.h) $(wildcard kernel/input/ps2/*.h) \
-             $(wildcard kernel/input/keyboard/*.h) \
-             $(wildcard kernel/input/mouse/*.h) $(wildcard kernel/input/hid/*.h) \
-             $(wildcard kernel/msi/*.h) \
-             $(wildcard kernel/hw/events/*.h) $(wildcard kernel/hw/power/*.h) \
-             $(wildcard kernel/hw/diagnostics/*.h) \
-             $(wildcard kernel/usb/core/*.h) $(wildcard kernel/usb/xhci/*.h) \
-             $(wildcard kernel/usb/hid/*.h) \
-             shared/include/boot_info.h
+KERN_HDR  := $(shell find kernel -name '*.h') shared/include/boot_info.h
 
-vpath %.c kernel/src kernel/arch/x86_64 kernel/memory kernel/sched kernel/tests \
-          kernel/initramfs kernel/user kernel/fs kernel/fs/ramfs kernel/fs/devfs \
-          kernel/fs/hnxfs kernel/device kernel/tty kernel/process kernel/driver \
-          kernel/pci kernel/block kernel/partition kernel/storage \
-          kernel/storage/ahci kernel/storage/nvme kernel/input kernel/input/ps2 \
-          kernel/input/keyboard kernel/input/mouse kernel/input/hid \
-          kernel/msi kernel/hw/events kernel/hw/power kernel/hw/diagnostics \
-          kernel/usb/core kernel/usb/xhci kernel/usb/hid
-vpath %.S kernel/arch/x86_64 kernel/sched kernel/user
+vpath %.c $(KERN_DIRS)
+vpath %.S $(KERN_DIRS)
 
 # ---- User-space sources / objects ------------------------------------------
 USER_LIB_OBJ := $(B_USER)/syscall.o $(B_USER)/string.o $(B_USER)/stdlib.o \
@@ -143,10 +98,18 @@ USER_BIN     := init shell echo cat ls pwd clear help true false yes whoami \
                 mkdir rm touch writefile readfile hexdump stat mounts devices \
                 blocks lspci lsblk keyboard_test tty_test \
                 hwinfo drivers devtree interrupts msiinfo powerinfo \
-                lsusb usbinfo hidinfo usbtest keytest mousetest inputtest
+                lsusb usbinfo hidinfo usbtest keytest mousetest inputtest \
+                id kill jobs time ulimit \
+                cp mv sort uniq head tail wc grep find basename dirname date \
+                sleep free du df which env printenv uname sync dmesg seq tee \
+                cmp cut tr nl rev \
+                serviced
 USER_TEST    := syscall_test fd_test spawn_test vfs_test fault_test \
                 storage_test fs_test disk_test cache_test \
-                usb_test hid_test input_test msi_test
+                usb_test hid_test input_test msi_test \
+                process_tree_test fd_stress_test syscall_stress_test \
+                memory_map_test libc_test coreutils_test \
+                process_stress_test test_runner
 USER_PROGS   := $(addprefix $(B_USER)/,$(addsuffix .hxe,$(USER_BIN) $(USER_TEST)))
 USER_HDR     := $(wildcard user/include/*.h) kernel/user/syscall_numbers.h \
                 kernel/user/syscall_abi.h
@@ -318,6 +281,65 @@ loc:
 	@printf 'tools      : %s\n' "$$(find tools -type f -name '*.py' -exec cat {} + | wc -l | tr -d ' ')"
 	@printf 'docs       : %s\n' "$$(find docs -type f -name '*.md' -exec cat {} + | wc -l | tr -d ' ')"
 	@printf 'total      : %s\n' "$$(find bootloader kernel user shared tools docs -type f \( -name '*.c' -o -name '*.h' -o -name '*.S' -o -name '*.ld' -o -name '*.py' -o -name '*.md' \) -exec cat {} + | wc -l | tr -d ' ')"
+
+# ---- Production LOC gate ----------------------------------------------------
+# Counts useful source/doc/tool LOC only. Build artifacts (build/), object
+# files, ELF/EFI binaries, disk images and firmware live outside the scanned
+# trees or have non-source extensions, so they are excluded by construction.
+PROD_LOC_MIN := 200000
+PROD_LOC_FIND = find bootloader kernel user shared tools docs -type f \
+    \( -name '*.c' -o -name '*.h' -o -name '*.S' -o -name '*.ld' \
+       -o -name '*.py' -o -name '*.md' -o -name '*.spec' \)
+
+production-loc-check:
+	@total=$$($(PROD_LOC_FIND) -exec cat {} + | wc -l | tr -d ' '); \
+	  printf 'production useful LOC : %s\n' "$$total"; \
+	  printf 'production target     : %s\n' "$(PROD_LOC_MIN)"; \
+	  if [ "$$total" -lt $(PROD_LOC_MIN) ]; then \
+	    need=$$(( $(PROD_LOC_MIN) - total )); \
+	    echo "[FAIL] production LOC below target"; \
+	    printf 'current LOC    : %s\n' "$$total"; \
+	    printf 'remaining LOC  : %s\n' "$$need"; \
+	    exit 1; \
+	  fi; \
+	  printf '[PASS] production LOC >= %s (have %s)\n' "$(PROD_LOC_MIN)" "$$total"
+
+# ---- Production Overhaul Phase 1 aggregate verification ---------------------
+# Runs all pre-existing verification plus every verification added in this phase,
+# then enforces the 200k useful-LOC gate. New per-subsystem targets are defined
+# in Makefile.production (included below) as each work unit lands.
+.PHONY: production-loc-check verify-production-200k
+verify-production-200k:
+	$(MAKE) verify-prompt6
+	$(MAKE) verify-kernel-core-expanded
+	$(MAKE) verify-process-expanded
+	$(MAKE) verify-syscall-expanded
+	$(MAKE) verify-vfs-expanded
+	$(MAKE) verify-hnxfs-expanded
+	$(MAKE) verify-page-cache
+	$(MAKE) verify-fs-stress
+	$(MAKE) verify-driver-expanded
+	$(MAKE) verify-pci-expanded
+	$(MAKE) verify-ahci-expanded
+	$(MAKE) verify-nvme
+	$(MAKE) verify-block-expanded
+	$(MAKE) verify-xhci-expanded
+	$(MAKE) verify-usb-expanded
+	$(MAKE) verify-hid-expanded
+	$(MAKE) verify-input-expanded
+	$(MAKE) verify-network
+	$(MAKE) verify-libc-expanded
+	$(MAKE) verify-shell-expanded
+	$(MAKE) verify-coreutils-expanded
+	$(MAKE) verify-services
+	$(MAKE) verify-test-infra
+	$(MAKE) verify-stress
+	$(MAKE) verify-randomized
+	$(MAKE) verify-qemu-matrix
+	$(MAKE) production-loc-check
+	@echo "[OK] verify-production-200k passed"
+
+-include Makefile.production
 
 # ---- Headless run (serial on stdio, no window) -----------------------------
 run-headless: image

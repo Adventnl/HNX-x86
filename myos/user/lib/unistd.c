@@ -114,3 +114,68 @@ int mouse_poll(struct sys_mouse_event *out) {
 int msi_info(struct sys_msi_entry *out, int max) {
     return (int)__syscall(SYS_MSI_INFO, (long)out, max, 0);
 }
+
+/* ---- Work Unit B wrappers ------------------------------------------------ */
+
+long getppid(void)  { return __syscall(SYS_GETPPID, 0, 0, 0); }
+long gettid(void)   { return __syscall(SYS_GETTID, 0, 0, 0); }
+long getuid(void)   { return __syscall(SYS_GETUID, 0, 0, 0); }
+long setuid(long uid) { return __syscall(SYS_SETUID, uid, 0, 0); }
+long getgid(void)   { return __syscall(SYS_GETGID, 0, 0, 0); }
+long setgid(long gid) { return __syscall(SYS_SETGID, gid, 0, 0); }
+
+int  getpriority(int which, long who) {
+    return (int)__syscall(SYS_GETPRIORITY, which, who, 0);
+}
+int  setpriority(int which, long who, int prio) {
+    return (int)__syscall(SYS_SETPRIORITY, which, who, prio);
+}
+
+long brk(unsigned long addr) { return __syscall(SYS_BRK, (long)addr, 0, 0); }
+void *sbrk(long delta) {
+    long r = __syscall(SYS_SBRK, delta, 0, 0);
+    if (r < 0) {
+        return (void *)-1;
+    }
+    return (void *)r;
+}
+void *mmap(void *addr, unsigned long len, int prot, int flags) {
+    long r = __syscall(SYS_MMAP, (long)addr, (long)len, prot);
+    (void)flags;
+    if (r < 0) {
+        return (void *)-1;
+    }
+    return (void *)r;
+}
+int munmap(void *addr, unsigned long len) {
+    return (int)__syscall(SYS_MUNMAP, (long)addr, (long)len, 0);
+}
+
+int dup(int fd)            { return (int)__syscall(SYS_DUP, fd, 0, 0); }
+int dup2(int oldfd, int newfd) { return (int)__syscall(SYS_DUP2, oldfd, newfd, 0); }
+int fcntl(int fd, int cmd, long arg) { return (int)__syscall(SYS_FCNTL, fd, cmd, arg); }
+int ioctl(int fd, unsigned long req, long arg) { return (int)__syscall(SYS_IOCTL, fd, (long)req, arg); }
+int pipe(int fds[2])       { return (int)__syscall(SYS_PIPE, (long)fds, 0, 0); }
+
+long waitpid(long pid, long *status, int options) {
+    return __syscall(SYS_WAITPID, pid, (long)status, options);
+}
+int kill(long pid, int sig) { return (int)__syscall(SYS_KILL, pid, sig, 0); }
+
+int gettimeofday(struct sys_timeval *tv) {
+    return (int)__syscall(SYS_GETTIMEOFDAY, (long)tv, 0, 0);
+}
+int clock_gettime(int clk, struct sys_timespec *ts) {
+    return (int)__syscall(SYS_CLOCK_GETTIME, clk, (long)ts, 0);
+}
+int nanosleep(const struct sys_timespec *ts) {
+    return (int)__syscall(SYS_NANOSLEEP, (long)ts, 0, 0);
+}
+
+long getpgid(long pid)            { return __syscall(SYS_GETPGID, pid, 0, 0); }
+int  setpgid(long pid, long pgid) { return (int)__syscall(SYS_SETPGID, pid, pgid, 0); }
+long getsid(long pid)             { return __syscall(SYS_GETSID, pid, 0, 0); }
+long setsid(void)                 { return __syscall(SYS_SETSID, 0, 0, 0); }
+
+int env_set(const char *kv)                  { return (int)__syscall(SYS_ENV_SET, (long)kv, 0, 0); }
+int env_get(const char *key, char *out)      { return (int)__syscall(SYS_ENV_GET, (long)key, (long)out, 0); }

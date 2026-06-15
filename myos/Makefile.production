@@ -1,0 +1,256 @@
+# Makefile.production — Production Overhaul Phase 1 verification targets.
+#
+# Included by the main Makefile via `-include`. Each work unit appends its
+# verification target(s) here as it lands so that `verify-production-200k`
+# can run the complete suite. Every target boots the real image under QEMU
+# and greps the serial log for markers emitted by code that actually ran —
+# there are no hardcoded pass strings.
+#
+# Marker conventions (matched by tools/verify_qemu.py --expect):
+#   [OK]   subsystem came online during boot
+#   [PASS] a named self-test passed
+#   [FAIL] / [PANIC] a self-test failed (boot aborts)
+
+.PHONY: verify-kernel-core-expanded verify-process-expanded \
+        verify-syscall-expanded verify-vfs-expanded verify-hnxfs-expanded \
+        verify-page-cache verify-fs-stress verify-driver-expanded \
+        verify-pci-expanded verify-ahci-expanded verify-nvme \
+        verify-block-expanded verify-xhci-expanded verify-usb-expanded \
+        verify-hid-expanded verify-input-expanded verify-network \
+        verify-ethernet verify-arp verify-ipv4 verify-icmp verify-udp \
+        verify-dhcp verify-dns verify-sockets verify-libc-expanded \
+        verify-shell-expanded verify-coreutils-expanded verify-services \
+        verify-test-infra verify-stress verify-randomized
+
+# ---- Work Unit A: kernel core production foundation ------------------------
+verify-kernel-core-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name kernel-core --timeout 90 \
+	  --log $(B_IMG)/kernel-core.log \
+	  --expect "[PASS] lib list tests" \
+	  --expect "[PASS] hash table tests" \
+	  --expect "[PASS] bitmap tests" \
+	  --expect "[PASS] ring buffer tests" \
+	  --expect "[PASS] kmalloc/kfree tests" \
+	  --expect "[PASS] slab allocator tests" \
+	  --expect "[PASS] VM region tests" \
+	  --expect "[PASS] wait queue tests" \
+	  --expect "[PASS] mutex tests" \
+	  --expect "[PASS] rwlock tests" \
+	  --expect "[PASS] workqueue tests" \
+	  --expect "[PASS] timer callout tests" \
+	  --expect "[PASS] debug dump tests" \
+	  --expect "[OK] Kernel core production foundation online"
+
+# ---- Work Unit B: process / scheduler / syscall expansion -----------------
+verify-process-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name process-expanded --timeout 120 \
+	  --log $(B_IMG)/process-expanded.log \
+	  --expect "[PASS] process tree tests" \
+	  --expect "[PASS] waitpid tests" \
+	  --expect "[PASS] zombie cleanup tests" \
+	  --expect "[OK] Process/syscall production foundation online"
+
+verify-syscall-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name syscall-expanded --timeout 120 \
+	  --log $(B_IMG)/syscall-expanded.log \
+	  --expect "[PASS] fd duplication tests" \
+	  --expect "[PASS] syscall stress tests" \
+	  --expect "[PASS] user memory map tests"
+
+# ---- Work Unit C: VFS / HNXFS / page+buffer cache -------------------------
+verify-vfs-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name vfs-expanded --timeout 120 \
+	  --log $(B_IMG)/vfs-expanded.log \
+	  --expect "[PASS] VFS path normalization" \
+	  --expect "[PASS] dentry cache" \
+	  --expect "[PASS] rename" \
+	  --expect "[PASS] link foundation" \
+	  --expect "[PASS] append" \
+	  --expect "[PASS] truncate" \
+	  --expect "[OK] VFS/HNXFS production foundation online"
+
+verify-hnxfs-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name hnxfs-expanded --timeout 120 \
+	  --log $(B_IMG)/hnxfs-expanded.log \
+	  --expect "[PASS] large file" \
+	  --expect "[PASS] hnxfs fsck" \
+	  --expect "[PASS] hnxfs corruption detection"
+
+verify-page-cache: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name page-cache --timeout 120 \
+	  --log $(B_IMG)/page-cache.log \
+	  --expect "[PASS] page cache" \
+	  --expect "[PASS] buffer cache"
+
+verify-fs-stress: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name fs-stress --timeout 120 \
+	  --log $(B_IMG)/fs-stress.log \
+	  --expect "[PASS] fs stress"
+
+# ---- Work Unit F: networking ----------------------------------------------
+verify-network: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name network --timeout 120 \
+	  --log $(B_IMG)/network.log \
+	  --expect "[OK] NIC driver" \
+	  --expect "[PASS] Ethernet" \
+	  --expect "[PASS] ARP" \
+	  --expect "[PASS] IPv4" \
+	  --expect "[PASS] ICMP ping" \
+	  --expect "[PASS] UDP" \
+	  --expect "[PASS] DHCP" \
+	  --expect "[PASS] DNS" \
+	  --expect "[PASS] socket API" \
+	  --expect "[OK] Networking foundation online"
+
+# Per-protocol sub-targets grep the same network serial log for one marker each.
+verify-ethernet: image
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name net-eth --timeout 120 \
+	  --log $(B_IMG)/net-eth.log --expect "[PASS] Ethernet"
+verify-arp: image
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name net-arp --timeout 120 \
+	  --log $(B_IMG)/net-arp.log --expect "[PASS] ARP"
+verify-ipv4: image
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name net-ip --timeout 120 \
+	  --log $(B_IMG)/net-ip.log --expect "[PASS] IPv4"
+verify-icmp: image
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name net-icmp --timeout 120 \
+	  --log $(B_IMG)/net-icmp.log --expect "[PASS] ICMP ping"
+verify-udp: image
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name net-udp --timeout 120 \
+	  --log $(B_IMG)/net-udp.log --expect "[PASS] UDP"
+verify-dhcp: image
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name net-dhcp --timeout 120 \
+	  --log $(B_IMG)/net-dhcp.log --expect "[PASS] DHCP"
+verify-dns: image
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name net-dns --timeout 120 \
+	  --log $(B_IMG)/net-dns.log --expect "[PASS] DNS"
+verify-sockets: image
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name net-sock --timeout 120 \
+	  --log $(B_IMG)/net-sock.log --expect "[PASS] socket API"
+
+# ---- Work Unit G: userland / libc / coreutils / services ------------------
+verify-libc-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name libc-expanded --timeout 120 \
+	  --log $(B_IMG)/libc-expanded.log \
+	  --expect "[PASS] libc runtime tests"
+
+verify-shell-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name shell-expanded --timeout 120 \
+	  --log $(B_IMG)/shell-expanded.log \
+	  --expect "[PASS] shell expanded tests"
+
+verify-coreutils-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name coreutils-expanded --timeout 120 \
+	  --log $(B_IMG)/coreutils-expanded.log \
+	  --expect "[PASS] coreutils suite"
+
+verify-services: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name services --timeout 120 \
+	  --log $(B_IMG)/services.log \
+	  --expect "[PASS] service manager foundation" \
+	  --expect "[OK] Userland production foundation online"
+
+# ---- Work Unit D: storage / driver expansion ------------------------------
+verify-driver-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name driver-expanded --timeout 120 \
+	  --log $(B_IMG)/driver-expanded.log \
+	  --expect "[PASS] driver lifecycle" \
+	  --expect "[OK] Storage/driver production foundation online"
+
+verify-pci-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name pci-expanded --timeout 120 \
+	  --log $(B_IMG)/pci-expanded.log \
+	  --expect "[PASS] PCI capabilities" \
+	  --expect "[PASS] MSI foundation"
+
+verify-ahci-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name ahci-expanded --timeout 120 \
+	  --log $(B_IMG)/ahci-expanded.log \
+	  --expect "[PASS] AHCI identify" \
+	  --expect "[PASS] AHCI multi-sector read/write" \
+	  --expect "[PASS] AHCI error handling"
+
+verify-nvme: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name nvme --timeout 120 \
+	  --log $(B_IMG)/nvme.log \
+	  --expect "[PASS] NVMe identify" \
+	  --expect "[PASS] NVMe read/write deferred (no fake block device)"
+
+verify-block-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name block-expanded --timeout 120 \
+	  --log $(B_IMG)/block-expanded.log \
+	  --expect "[PASS] block async foundation" \
+	  --expect "[PASS] block stats"
+
+# ---- Work Unit E: USB / input expansion -----------------------------------
+verify-xhci-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name xhci-expanded --timeout 120 \
+	  --log $(B_IMG)/xhci-expanded.log \
+	  --expect "[PASS] xHCI rings" \
+	  --expect "[PASS] xHCI commands"
+
+verify-usb-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name usb-expanded --timeout 120 \
+	  --log $(B_IMG)/usb-expanded.log \
+	  --expect "[PASS] USB enumeration" \
+	  --expect "[PASS] USB descriptors"
+
+verify-hid-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name hid-expanded --timeout 120 \
+	  --log $(B_IMG)/hid-expanded.log \
+	  --expect "[PASS] USB keyboard" \
+	  --expect "[PASS] USB mouse" \
+	  --expect "[PASS] HID parser"
+
+verify-input-expanded: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name input-expanded --timeout 120 \
+	  --log $(B_IMG)/input-expanded.log \
+	  --expect "[PASS] unified input" \
+	  --expect "[PASS] TTY input from USB and PS/2" \
+	  --expect "[OK] USB/input production foundation online"
+
+# ---- Work Unit H: test infrastructure + fuzz/stress -----------------------
+verify-test-infra: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name test-infra --timeout 120 \
+	  --log $(B_IMG)/test-infra.log \
+	  --expect "[PASS] kernel test registry" \
+	  --expect "[PASS] user test runner" \
+	  --expect "[OK] Test infrastructure online"
+
+verify-stress: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name stress --timeout 120 \
+	  --log $(B_IMG)/stress.log \
+	  --expect "[PASS] fs stress" \
+	  --expect "[PASS] process stress" \
+	  --expect "[PASS] syscall stress"
+
+verify-randomized: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name randomized --timeout 120 \
+	  --log $(B_IMG)/randomized.log \
+	  --expect "[PASS] allocator randomized" \
+	  --expect "[PASS] USB descriptor corpus" \
+	  --expect "[PASS] packet simulation"

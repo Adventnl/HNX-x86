@@ -56,6 +56,15 @@ static void run_line(char *line, int *want_exit) {
     if (argc == 0) {
         return;
     }
+    /* $VAR expansion: replace a "$NAME" argument with its variable value. */
+    for (int i = 0; i < argc; i++) {
+        if (argv[i][0] == '$') {
+            const char *v = shell_var_get(argv[i] + 1);
+            if (v) {
+                argv[i] = (char *)v;
+            }
+        }
+    }
     if (builtin_try(argc, argv, want_exit)) {
         return;
     }
@@ -98,6 +107,7 @@ int main(int argc, char **argv) {
         if (n == 0) {
             continue;
         }
+        shell_history_record(line);
         run_line(line, &want_exit);
     }
 

@@ -42,4 +42,40 @@ int input_poll(struct sys_input_event *out);     /* 1 = event, 0 = none */
 int mouse_poll(struct sys_mouse_event *out);      /* 1 = event, 0 = none */
 int msi_info(struct sys_msi_entry *out, int max);
 
+/* ---- Work Unit B: process / credentials / time / fd / memory ---- */
+long getppid(void);
+long gettid(void);
+long getuid(void);
+long setuid(long uid);
+long getgid(void);
+long setgid(long gid);
+int  getpriority(int which, long who);
+int  setpriority(int which, long who, int prio);
+
+long  brk(unsigned long addr);
+void *sbrk(long delta);
+void *mmap(void *addr, unsigned long len, int prot, int flags);
+int   munmap(void *addr, unsigned long len);
+
+int dup(int fd);
+int dup2(int oldfd, int newfd);
+int fcntl(int fd, int cmd, long arg);
+int ioctl(int fd, unsigned long req, long arg);
+int pipe(int fds[2]);
+
+long waitpid(long pid, long *status, int options);
+int  kill(long pid, int sig);
+
+int gettimeofday(struct sys_timeval *tv);
+int clock_gettime(int clk, struct sys_timespec *ts);
+int nanosleep(const struct sys_timespec *ts);
+
+long getpgid(long pid);
+int  setpgid(long pid, long pgid);
+long getsid(long pid);
+long setsid(void);
+
+int env_set(const char *kv);
+int env_get(const char *key, char *out);
+
 #endif /* MYOS_USER_UNISTD_H */

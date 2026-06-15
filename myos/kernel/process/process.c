@@ -108,7 +108,8 @@ static struct process *create_full(const char *path, int argc, char *const argv[
     }
     if (user_map_range(space, USER_STACK_TOP - USER_STACK_SIZE, USER_STACK_SIZE,
                        PAGE_WRITABLE) != 0 ||
-        user_map_range(space, USER_HEAP_BASE, USER_HEAP_INITIAL, PAGE_WRITABLE) != 0) {
+        user_map_range(space, USER_HEAP_BASE, USER_HEAP_INITIAL, PAGE_WRITABLE) != 0 ||
+        user_map_range(space, PROCESS_BRK_BASE, PROCESS_BRK_INITIAL, PAGE_WRITABLE) != 0) {
         user_address_space_destroy(space);
         return NULL;
     }
@@ -139,6 +140,22 @@ static struct process *create_full(const char *path, int argc, char *const argv[
         return NULL;
     }
     wire_stdio(p);
+
+    /* Work Unit B: initialize the expanded process state (credentials inherited
+     * from the parent, fresh program break, job-control ids). */
+    process_init_ext(p);
+    if (parent) {
+        p->uid = parent->uid;
+        p->gid = parent->gid;
+        p->euid = parent->euid;
+        p->egid = parent->egid;
+        p->pgid = parent->pgid ? parent->pgid : p->pid;
+        p->sid = parent->sid ? parent->sid : p->pid;
+        parent->child_count++;
+    } else {
+        p->pgid = p->pid;
+        p->sid = p->pid;
+    }
     return p;
 }
 

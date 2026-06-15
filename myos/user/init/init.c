@@ -53,6 +53,24 @@ int main(void) {
     run("/tests/spawn_test.hxe");
     run("/tests/fault_test.hxe");      /* faults; kernel isolates it */
 
+    /* Production Overhaul Phase 1 — Work Unit B: process/syscall expansion.
+     * Each test runs in ring 3 and prints its own [PASS] markers. */
+    run("/tests/process_tree_test.hxe");
+    run("/tests/fd_stress_test.hxe");
+    run("/tests/syscall_stress_test.hxe");
+    run("/tests/memory_map_test.hxe");
+    print("[OK] Process/syscall production foundation online\n");
+
+    /* Work Unit G: userland libc + coreutils + service manager. */
+    run("/tests/libc_test.hxe");
+    run("/tests/coreutils_test.hxe");
+    run("/bin/serviced.hxe");
+    print("[OK] Userland production foundation online\n");
+
+    /* Work Unit H: userland stress + the user test runner. */
+    run("/tests/process_stress_test.hxe");
+    run("/tests/test_runner.hxe");
+
     /* Prompt 5: expanded coreutils smoke (storage + introspection). */
     int ok = 1;
     char *const a_mkdir[]  = { "/bin/mkdir.hxe", "/disk/cu", 0 };

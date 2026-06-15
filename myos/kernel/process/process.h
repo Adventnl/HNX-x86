@@ -40,7 +40,64 @@ struct process {
 
     uint64_t entry_rip;     /* user entry point */
     uint64_t user_rsp;      /* initial user stack pointer (argv block built) */
+
+    /* ---- Work Unit B: process model expansion ---- */
+    /* Credentials (foundation; no enforcement yet). */
+    uint32_t uid, gid;
+    uint32_t euid, egid;
+
+    /* Job control: process group + session. */
+    uint64_t pgid;
+    uint64_t sid;
+
+    /* Scheduling. */
+    int32_t  priority;      /* -20..19 nice-style; 0 = default */
+
+    /* Program break (brk/sbrk) over a pre-mapped arena. */
+    uint64_t brk_base;
+    uint64_t brk_current;
+    uint64_t brk_max;
+
+    /* mmap foundation: next anonymous mapping hint. */
+    uint64_t mmap_next;
+
+    /* CPU time accounting (ticks). */
+    uint64_t utime_ticks;
+    uint64_t stime_ticks;
+    uint64_t start_tick;
+
+    /* Lifecycle bookkeeping. */
+    uint64_t child_count;
+    int      reaped;        /* set once a zombie has been waited on */
+
+    /* Signal foundation (no delivery yet): pending + blocked masks. */
+    uint64_t sig_pending;
+    uint64_t sig_blocked;
+
+    /* Small environment block (KEY=VALUE strings, NUL-separated). */
+    char     environ[512];
+    uint32_t environ_len;
 };
+
+/* ---- Work Unit B accessors / helpers (kernel/process/proc_ext.c) ---- */
+void     process_init_ext(struct process *p);     /* defaults for new fields */
+int      process_set_priority(struct process *p, int prio);
+int      process_get_priority(struct process *p);
+int      process_setpgid(uint64_t pid, uint64_t pgid);
+uint64_t process_getpgid(uint64_t pid);
+uint64_t process_setsid(struct process *p);
+/* brk/sbrk over the per-process pre-mapped arena. */
+uint64_t process_brk(struct process *p, uint64_t new_break);  /* returns cur break */
+uint64_t process_sbrk(struct process *p, int64_t delta);      /* old break or -1 */
+/* Environment block helpers. */
+int      process_env_set(struct process *p, const char *kv);
+int      process_env_get(struct process *p, const char *key, char *out, int max);
+/* Non-blocking reap of any/specific exited child; returns pid or -ECHILD/0. */
+int      process_reap_zombie(uint64_t pid, int64_t *exit_code, int nohang);
+
+#define PROCESS_BRK_BASE     0x0000005000000000ULL
+#define PROCESS_BRK_INITIAL  0x0000000000040000ULL  /* 256 KiB pre-mapped */
+#define PROCESS_MMAP_BASE    0x0000006000000000ULL
 
 void process_system_init(void);
 

@@ -23,6 +23,10 @@ int puts(const char *s) {
     return 0;
 }
 
+int fputs(const char *s, int fd) {
+    return (int)write(fd, s, strlen(s));
+}
+
 static int u64_to_str(uint64_t v, char *out, int base, int upper) {
     char tmp[32];
     int i = 0;
@@ -56,25 +60,34 @@ void print_i64(int64_t v) {
     }
 }
 
-/* ---- printf -------------------------------------------------------------- */
+/* ---- printf core ----------------------------------------------------------
+ * A single formatter feeds either an fd (printf) via an internal flush buffer,
+ * or a caller-supplied bounded buffer (snprintf). */
 #define PBUF 256
 struct out {
-    char buf[PBUF];
-    int  len;
-    int  total;
+    char  buf[PBUF];   /* flush buffer when writing to an fd */
+    int   len;
+    int   total;       /* characters that would be written (snprintf semantics) */
+    int   fd;          /* >=0: write to this fd; <0: write to dst buffer */
+    char *dst;         /* destination buffer (snprintf) or NULL */
+    size_t cap;        /* dst capacity including room for NUL */
 };
 
 static void oflush(struct out *o) {
-    if (o->len) {
-        write(1, o->buf, (unsigned long)o->len);
+    if (o->fd >= 0 && o->len) {
+        write(o->fd, o->buf, (unsigned long)o->len);
         o->len = 0;
     }
 }
 static void oputc(struct out *o, char c) {
-    if (o->len == PBUF) {
-        oflush(o);
+    if (o->fd >= 0) {
+        if (o->len == PBUF) {
+            oflush(o);
+        }
+        o->buf[o->len++] = c;
+    } else if (o->dst && (size_t)o->total + 1 < o->cap) {
+        o->dst[o->total] = c;
     }
-    o->buf[o->len++] = c;
     o->total++;
 }
 static int field_len(const char *s) {
@@ -103,17 +116,12 @@ static void emit_field(struct out *o, const char *s, int len,
     }
 }
 
-int printf(const char *fmt, ...) {
-    __builtin_va_list ap;
-    __builtin_va_start(ap, fmt);
-    struct out o;
-    o.len = 0;
-    o.total = 0;
+static int vformat(struct out *o, const char *fmt, __builtin_va_list ap) {
     char num[40];
 
     for (; *fmt; fmt++) {
         if (*fmt != '%') {
-            oputc(&o, *fmt);
+            oputc(o, *fmt);
             continue;
         }
         fmt++;
@@ -142,12 +150,12 @@ int printf(const char *fmt, ...) {
             if (!s) {
                 s = "(null)";
             }
-            emit_field(&o, s, field_len(s), width, left, ' ');
+            emit_field(o, s, field_len(s), width, left, ' ');
             break;
         }
         case 'c': {
             char c = (char)__builtin_va_arg(ap, int);
-            emit_field(&o, &c, 1, width, left, ' ');
+            emit_field(o, &c, 1, width, left, ' ');
             break;
         }
         case 'd':
@@ -162,14 +170,14 @@ int printf(const char *fmt, ...) {
             } else {
                 len = u64_to_str((uint64_t)v, tmp, 10, 0);
             }
-            emit_field(&o, tmp, len, width, left, pad);
+            emit_field(o, tmp, len, width, left, pad);
             break;
         }
         case 'u': {
             uint64_t v = lng ? __builtin_va_arg(ap, unsigned long)
                              : (uint64_t)__builtin_va_arg(ap, unsigned int);
             int len = u64_to_str(v, num, 10, 0);
-            emit_field(&o, num, len, width, left, pad);
+            emit_field(o, num, len, width, left, pad);
             break;
         }
         case 'x':
@@ -177,7 +185,7 @@ int printf(const char *fmt, ...) {
             uint64_t v = lng ? __builtin_va_arg(ap, unsigned long)
                              : (uint64_t)__builtin_va_arg(ap, unsigned int);
             int len = u64_to_str(v, num, 16, *fmt == 'X');
-            emit_field(&o, num, len, width, left, pad);
+            emit_field(o, num, len, width, left, pad);
             break;
         }
         case 'p': {
@@ -185,22 +193,83 @@ int printf(const char *fmt, ...) {
             num[0] = '0';
             num[1] = 'x';
             int len = 2 + u64_to_str(v, num + 2, 16, 0);
-            emit_field(&o, num, len, width, left, ' ');
+            emit_field(o, num, len, width, left, ' ');
             break;
         }
         case '%':
-            oputc(&o, '%');
+            oputc(o, '%');
             break;
         case 0:
             goto done;
         default:
-            oputc(&o, '%');
-            oputc(&o, *fmt);
+            oputc(o, '%');
+            oputc(o, *fmt);
             break;
         }
     }
 done:
-    oflush(&o);
+    oflush(o);
+    return o->total;
+}
+
+int printf(const char *fmt, ...) {
+    struct out o;
+    o.len = 0;
+    o.total = 0;
+    o.fd = 1;
+    o.dst = NULL;
+    o.cap = 0;
+    __builtin_va_list ap;
+    __builtin_va_start(ap, fmt);
+    int n = vformat(&o, fmt, ap);
     __builtin_va_end(ap);
-    return o.total;
+    return n;
+}
+
+int vsnprintf(char *buf, size_t size, const char *fmt, __builtin_va_list ap) {
+    struct out o;
+    o.len = 0;
+    o.total = 0;
+    o.fd = -1;
+    o.dst = buf;
+    o.cap = size;
+    int n = vformat(&o, fmt, ap);
+    if (buf && size > 0) {
+        size_t end = ((size_t)n < size) ? (size_t)n : size - 1;
+        buf[end] = 0;
+    }
+    return n;
+}
+
+int snprintf(char *buf, size_t size, const char *fmt, ...) {
+    __builtin_va_list ap;
+    __builtin_va_start(ap, fmt);
+    int n = vsnprintf(buf, size, fmt, ap);
+    __builtin_va_end(ap);
+    return n;
+}
+
+/* Read one line (terminated by '\n' or EOF) from fd, byte at a time so we never
+ * over-read on a pipe/tty. Returns bytes stored; 0 = EOF, <0 = error. */
+long fdgets(int fd, char *buf, size_t size) {
+    if (size == 0) {
+        return 0;
+    }
+    size_t i = 0;
+    while (i + 1 < size) {
+        char c;
+        long r = read(fd, &c, 1);
+        if (r < 0) {
+            return r;
+        }
+        if (r == 0) {
+            break;          /* EOF */
+        }
+        buf[i++] = c;
+        if (c == '\n') {
+            break;
+        }
+    }
+    buf[i] = 0;
+    return (long)i;
 }

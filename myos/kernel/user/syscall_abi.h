@@ -111,4 +111,16 @@ struct sys_block_entry {
     unsigned int       _pad;
 };
 
+/* ---- Work Unit B: time ABI ----------------------------------------------- */
+
+struct sys_timeval {
+    unsigned long long tv_sec;
+    unsigned long long tv_usec;
+};
+
+struct sys_timespec {
+    unsigned long long tv_sec;
+    unsigned long long tv_nsec;
+};
+
 #endif /* MYOS_SYSCALL_ABI_H */

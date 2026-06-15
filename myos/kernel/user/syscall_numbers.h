@@ -39,7 +39,63 @@
 #define SYS_MOUSE_POLL  27
 #define SYS_MSI_INFO    28
 
-#define SYS_MAX_NR   29        /* one past the highest valid number */
+/* Production Overhaul Phase 1 (Work Unit B): process / credentials / time /
+ * fd / memory expansion. */
+#define SYS_GETPPID       29
+#define SYS_GETTID        30
+#define SYS_GETUID        31
+#define SYS_SETUID        32
+#define SYS_GETGID        33
+#define SYS_SETGID        34
+#define SYS_GETPRIORITY   35
+#define SYS_SETPRIORITY   36
+#define SYS_BRK           37
+#define SYS_SBRK          38
+#define SYS_MMAP          39
+#define SYS_MUNMAP        40
+#define SYS_DUP           41
+#define SYS_DUP2          42
+#define SYS_PIPE          43
+#define SYS_FCNTL         44
+#define SYS_IOCTL         45
+#define SYS_WAITPID       46
+#define SYS_KILL          47
+#define SYS_GETTIMEOFDAY  48
+#define SYS_CLOCK_GETTIME 49
+#define SYS_NANOSLEEP     50
+#define SYS_GETPGID       51
+#define SYS_SETPGID       52
+#define SYS_GETSID        53
+#define SYS_SETSID        54
+#define SYS_ENV_GET       55
+#define SYS_ENV_SET       56
+
+#define SYS_MAX_NR   57        /* one past the highest valid number */
+
+/* waitpid options. */
+#define WNOHANG   0x1
+#define WUNTRACED 0x2
+
+/* fcntl commands. */
+#define F_DUPFD  0
+#define F_GETFD  1
+#define F_SETFD  2
+#define F_GETFL  3
+#define F_SETFL  4
+#define FD_CLOEXEC 1
+
+/* mmap protection / flags (foundation). */
+#define PROT_NONE  0x0
+#define PROT_READ  0x1
+#define PROT_WRITE 0x2
+#define PROT_EXEC  0x4
+#define MAP_PRIVATE   0x02
+#define MAP_ANONYMOUS 0x20
+#define MAP_FIXED     0x10
+
+/* clock ids. */
+#define CLOCK_REALTIME  0
+#define CLOCK_MONOTONIC 1
 
 /* lseek whence. */
 #define SEEK_SET 0
