@@ -177,3 +177,18 @@ gdb build/kernel/kernel.elf
 (gdb) break kernel_main
 (gdb) continue
 ```
+
+## Prompt 6 verification targets
+
+```bash
+make verify-msi               # PCI caps + MSI/MSI-X foundation
+make verify-driver-lifecycle  # lifecycle state machine + hardware event bus
+make verify-xhci              # xHCI controller bring-up + root hub scan
+make verify-usb               # USB core + descriptor parser + enumeration
+make verify-hid               # HID keyboard/mouse online + report tests
+make verify-input-unified     # PS/2 + USB keyboard + mouse + TTY unification
+make verify-hw-userland       # hwinfo/drivers/devtree/lsusb/hidinfo/inputtest
+make verify-prompt6           # all of the above + verify-prompt5 + memory matrix
+```
+
+Each boots the image headlessly in QEMU + OVMF and greps the COM1 serial log for required markers. QEMU now also attaches `-device qemu-xhci -device usb-kbd -device usb-mouse` (see tools/run_qemu.py / tools/verify_qemu.py). New offline tooling: `tools/usb/decode_usb_descriptor.py`, `tools/usb/decode_hid_report.py`, `tools/hw/inspect_devices.py`, `tools/hw/inspect_interrupts.py`.

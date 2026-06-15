@@ -90,3 +90,27 @@ int devices(struct sys_device_entry *out, int max) {
 int blocks(struct sys_block_entry *out, int max) {
     return (int)__syscall(SYS_BLOCKS, (long)out, max, 0);
 }
+
+int usb_devices(struct sys_usb_entry *out, int max) {
+    return (int)__syscall(SYS_USB_DEVICES, (long)out, max, 0);
+}
+
+int hw_info(struct sys_hw_info *out) {
+    return (int)__syscall(SYS_HW_INFO, (long)out, 0, 0);
+}
+
+int interrupts(struct sys_irq_entry *out, int max) {
+    return (int)__syscall(SYS_INTERRUPTS, (long)out, max, 0);
+}
+
+int input_poll(struct sys_input_event *out) {
+    return (int)__syscall(SYS_INPUT_POLL, (long)out, 0, 0);
+}
+
+int mouse_poll(struct sys_mouse_event *out) {
+    return (int)__syscall(SYS_MOUSE_POLL, (long)out, 0, 0);
+}
+
+int msi_info(struct sys_msi_entry *out, int max) {
+    return (int)__syscall(SYS_MSI_INFO, (long)out, max, 0);
+}

@@ -37,5 +37,11 @@ int64_t sys_stat(struct syscall_frame *f);
 int64_t sys_mount_info(struct syscall_frame *f);
 int64_t sys_devices(struct syscall_frame *f);
 int64_t sys_blocks(struct syscall_frame *f);
+int64_t sys_usb_devices(struct syscall_frame *f);
+int64_t sys_hw_info(struct syscall_frame *f);
+int64_t sys_interrupts(struct syscall_frame *f);
+int64_t sys_input_poll(struct syscall_frame *f);
+int64_t sys_mouse_poll(struct syscall_frame *f);
+int64_t sys_msi_info(struct syscall_frame *f);
 
 #endif /* MYOS_SYSCALL_TABLE_H */

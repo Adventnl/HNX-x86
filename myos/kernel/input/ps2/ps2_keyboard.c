@@ -24,12 +24,14 @@ void ps2_keyboard_handle_scancode(uint8_t sc) {
     if (sc & SC_RELEASE_BIT) {
         struct input_event ev;
         input_event_init_key(&ev, (uint16_t)(sc & 0x7F), 0);
+        ev.source = INPUT_SRC_PS2_KEYBOARD;
         input_queue_push(&ev);
         return;   /* key release: no character */
     }
 
     struct input_event ev;
     input_event_init_key(&ev, sc, 1);
+    ev.source = INPUT_SRC_PS2_KEYBOARD;
     input_queue_push(&ev);
 
     char c = keymap_us_translate(sc, g_shift);

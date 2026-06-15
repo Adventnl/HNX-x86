@@ -53,6 +53,20 @@
 #include "pci_tests.h"
 #include "storage_tests.h"
 #include "input_tests.h"
+/* Prompt 6: USB + hardware compatibility. */
+#include "msi.h"
+#include "msi_tests.h"
+#include "hw_event_bus.h"
+#include "driver_tests.h"
+#include "xhci.h"
+#include "xhci_tests.h"
+#include "usb.h"
+#include "usb_hub.h"
+#include "usb_tests.h"
+#include "hid.h"
+#include "hid_input.h"
+#include "hid_tests.h"
+#include "input_compat_tests.h"
 
 static const struct boot_info *g_boot_info;
 
@@ -96,7 +110,7 @@ void kernel_main(struct boot_info *bi) {
     fbcon_set_color(0x00FFFFFF, 0x00000000);
     fbcon_clear(0x00000000);
 
-    kernel_log_line("MyOS Kernel 0.0.5");
+    kernel_log_line("MyOS Kernel 0.0.6");
     kernel_log_ok("Kernel entered");
     kernel_log_ok("Boot info magic valid");
     kernel_log_ok("Framebuffer console online");
@@ -278,6 +292,37 @@ void kernel_main(struct boot_info *bi) {
     hnxfs_tests_run();
     input_tests_run();
     kernel_log_ok("Storage and device expansion tests passed");
+    kernel_log_ok("Prompt 5 baseline verification passed");
+
+    /* ===== Prompt 6: USB + hardware compatibility ===== */
+
+    /* PCI capability parsing + MSI/MSI-X foundation. */
+    msi_init();
+    msi_tests_run();
+
+    /* Driver lifecycle hooks + hardware event bus. */
+    driver_lifecycle_init();
+    hw_event_bus_init();
+    driver_tests_run();
+
+    /* xHCI USB host controller bring-up + root hub scan. */
+    xhci_init();
+    xhci_tests_run();
+
+    /* USB core + hub foundation, then enumerate devices off the xHCI root hub. */
+    usb_core_init();
+    usb_hub_init();
+    xhci_attach_usb();
+    usb_tests_run();
+
+    /* USB HID + unified input stack: bind the keyboard/mouse, then unify PS/2 +
+     * USB input under a single event model feeding the TTY and mouse queue. */
+    hid_init();
+    usb_match_drivers();
+    unified_input_init();
+    hid_tests_run();
+    input_compat_tests_run();
+    kernel_log_ok("USB and hardware compatibility tests passed");
 
     /* Pre-load the scripted shell session (raw lines), then the interactive
      * session (also pre-fed here; the shell -i prints prompts and reads it). */

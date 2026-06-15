@@ -84,6 +84,12 @@ def main():
             "-drive", "id=nvm0,if=none,format=raw,file=%s" % args.nvme,
             "-device", "nvme,serial=hnxnvme,drive=nvm0",
         ]
+    # USB: an xHCI host controller with a boot keyboard and mouse attached.
+    cmd += [
+        "-device", "qemu-xhci,id=xhci",
+        "-device", "usb-kbd,bus=xhci.0,id=usbkbd",
+        "-device", "usb-mouse,bus=xhci.0,id=usbmouse",
+    ]
     cmd += [
         "-serial", "stdio",
         "-net", "none",

@@ -32,3 +32,7 @@ Self-test: type `h i x <bs> <enter>` and confirm the cooked line is exactly
 Both read one line at a time from stdin, so the scripted shell stops at its
 `exit` and leaves the following lines for the interactive shell — letting a
 single pre-loaded console stream drive both sessions deterministically.
+
+## Prompt 6 — unified keyboard input
+
+The TTY canonical line discipline now receives text from BOTH the PS/2 keyboard and the USB HID keyboard through the unified input bridge (`input_emit_text` calls `tty_input_char`). A self-test types "hi\n" via USB boot keyboard reports and confirms `tty_read` returns the cooked line: `[PASS] tty accepts unified keyboard input`. See [input.md](input.md).

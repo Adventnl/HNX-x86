@@ -90,6 +90,28 @@ int main(void) {
         print("[FAIL] storage user programs\n");
     }
 
+    /* Prompt 6: hardware + USB + input userland tools. Each tool queries the
+     * kernel over the new syscalls and exits 0 on success. */
+    if (run("/bin/hwinfo.hxe")  == 0) print("[PASS] hwinfo\n");  else print("[FAIL] hwinfo\n");
+    if (run("/bin/drivers.hxe") == 0) print("[PASS] drivers\n"); else print("[FAIL] drivers\n");
+    if (run("/bin/devtree.hxe") == 0) print("[PASS] devtree\n"); else print("[FAIL] devtree\n");
+    if (run("/bin/lsusb.hxe")   == 0) print("[PASS] lsusb\n");   else print("[FAIL] lsusb\n");
+    if (run("/bin/hidinfo.hxe") == 0) print("[PASS] hidinfo\n"); else print("[FAIL] hidinfo\n");
+    if (run("/bin/inputtest.hxe") == 0) print("[PASS] inputtest\n"); else print("[FAIL] inputtest\n");
+    /* Remaining HW/USB/input tools (informational output). */
+    run("/bin/interrupts.hxe");
+    run("/bin/msiinfo.hxe");
+    run("/bin/powerinfo.hxe");
+    run("/bin/usbinfo.hxe");
+    run("/bin/keytest.hxe");
+    run("/bin/mousetest.hxe");
+    run("/bin/usbtest.hxe");
+    /* Prompt 6 ring-3 assertion tests. */
+    run("/tests/usb_test.hxe");
+    run("/tests/hid_test.hxe");
+    run("/tests/input_test.hxe");
+    run("/tests/msi_test.hxe");
+
     /* Shells: scripted, then interactive. */
     run("/bin/shell.hxe");
     char *const a_shell_i[] = { "/bin/shell.hxe", "-i", 0 };

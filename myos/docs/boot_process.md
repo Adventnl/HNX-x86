@@ -254,3 +254,16 @@ access with the kernel CR3 (poll-only, non-blocking), so the controller and DMA
 frames — which live outside the user CR3's mirror — are reachable. HNXFS/block
 metadata buffers live in the kernel image + heap (< 4 MiB), mirrored in every
 user CR3, so the rest of the path needs no switch.
+
+## Prompt 6 — USB + hardware bring-up
+
+After the Prompt 5 self-tests, `kernel_main` runs the Prompt 6 section (kernel
+version string is now `MyOS Kernel 0.0.6`):
+
+1. `msi_init()` + `msi_tests_run()` — parse PCI capabilities, MSI/MSI-X foundation.
+2. `driver_lifecycle_init()` + `hw_event_bus_init()` + `driver_tests_run()`.
+3. `xhci_init()` + `xhci_tests_run()` — discover + bring up the xHCI controller, scan the root hub.
+4. `usb_core_init()` + `usb_hub_init()` + `xhci_attach_usb()` + `usb_tests_run()` — enumerate USB devices over EP0 control transfers.
+5. `hid_init()` + `usb_match_drivers()` + `unified_input_init()` + `hid_tests_run()` + `input_compat_tests_run()` — bind HID keyboard/mouse, unify PS/2 + USB input, then `[OK] USB and hardware compatibility tests passed`.
+
+All of this runs before the scheduler starts (so the markers appear in the boot log); the userland `[PASS] hwinfo/drivers/devtree/lsusb/hidinfo/inputtest` markers are printed later by `/bin/init.hxe`. See [prompt6.md](prompt6.md).

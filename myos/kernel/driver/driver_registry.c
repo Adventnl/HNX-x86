@@ -95,3 +95,7 @@ struct device *device_at(int index) {
     }
     return NULL;
 }
+
+struct driver *driver_registry_head(void) {
+    return g_drivers;
+}

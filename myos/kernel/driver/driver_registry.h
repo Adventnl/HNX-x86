@@ -20,4 +20,7 @@ void driver_dump_all(void);
 int            device_count(void);
 struct device *device_at(int index);
 
+/* Head of the registered-driver list (used by the lifecycle dispatcher). */
+struct driver *driver_registry_head(void);
+
 #endif /* MYOS_DRIVER_REGISTRY_H */

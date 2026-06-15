@@ -100,6 +100,21 @@ Implemented:
   **I/O APIC** with a canonical **TTY** line discipline, an **interactive shell**
   mode, and ~14 new coreutils (mkdir/rm/touch/writefile/readfile/hexdump/stat/
   mounts/devices/blocks/lspci/lsblk/…). Boots to `MyOS Kernel 0.0.5`.
+- **Prompt 6 (USB + hardware compatibility mega-phase):** **PCI capability
+  parsing** + an **MSI/MSI-X foundation**, a **driver lifecycle** (discovered→
+  matched→active→suspended/failed/removed) with power/reset hooks and a
+  **hardware event bus**, a from-scratch **xHCI** USB host controller (MMIO
+  bring-up, command/event TRB rings, device/input contexts, control + interrupt
+  transfers, root-hub scan), a **USB core** (descriptor parser, enumeration,
+  configuration), a **USB HID** boot keyboard + mouse, a **unified input stack**
+  merging PS/2 and USB input under one event model (text → TTY, mouse → event
+  queue), ~17 new HW/USB/input userland tools + 6 new syscalls, and offline
+  decoder tooling. Genuinely enumerates QEMU's `usb-kbd`/`usb-mouse`. Boots to
+  `MyOS Kernel 0.0.6`. See [docs/prompt6.md](docs/prompt6.md),
+  [docs/xhci.md](docs/xhci.md), [docs/usb.md](docs/usb.md),
+  [docs/hid.md](docs/hid.md), [docs/msi.md](docs/msi.md),
+  [docs/driver_lifecycle.md](docs/driver_lifecycle.md),
+  [docs/hardware_compatibility.md](docs/hardware_compatibility.md).
 
 ### What is tested how
 - **Tested by normal boot** (`make verify-boot`): bootloader, serial, logging,
@@ -124,9 +139,14 @@ Implemented:
   `verify-storage` (AHCI disk read/write), `verify-hnxfs` (persistent FS),
   `verify-keyboard`, `verify-tty` (canonical input + interactive shell),
   `verify-expanded-userland`. `make verify-prompt5` runs the whole chain.
-- **Not yet implemented (Prompt 6+):** USB/xHCI, USB HID, networking, GUI,
-  audio, SMP, journaling FS, full permissions, dynamic linker, package manager.
-  NVMe block I/O is a documented foundation (deferred).
+- **Tested by the USB/hardware targets (Prompt 6):** `verify-msi`,
+  `verify-driver-lifecycle`, `verify-xhci`, `verify-usb`, `verify-hid`,
+  `verify-input-unified`, `verify-hw-userland`. `make verify-prompt6` runs the
+  whole chain (including `verify-prompt5` + the memory matrix).
+- **Not yet implemented (Prompt 7+):** networking, GUI, audio, SMP, journaling
+  FS, full permissions, dynamic linker, package manager. USB mass storage and
+  NVMe block I/O are documented foundations (deferred). MSI/MSI-X is a
+  parsed/programmable foundation (controllers still poll).
 - **Intentionally deferred:** `kfree` reclamation (bump allocator no-op; user
   memory *is* reclaimed on process reap via the PMM), dead-thread stack
   reclamation, BootServices memory reclaim, I/O APIC programming (the LAPIC
@@ -143,12 +163,17 @@ The kernel's large `.bss` (stacks + 2 MiB heap arena) is `NOBITS` — zero bytes
 on disk, reserved only at load — so the on-disk kernel stays small while the
 mapped footprint stays below `USER_IMAGE_BASE` (4 MiB).
 
-Next milestone: **Prompt 6 — USB and hardware compatibility mega-phase** (xHCI
-controller, USB device enumeration, USB HID keyboard/mouse, improved input stack,
-PCI MSI/MSI-X foundation, driver power/reset handling, broader hardware
-compatibility, and expanded interactive userland).
+Next milestone: **Prompt 7 — networking mega-phase** (PCI NIC drivers, Ethernet,
+ARP, IPv4, ICMP ping, UDP, DHCP, DNS, a TCP foundation, a sockets API, network
+userland tools, and a network verification matrix).
 
-Previously: **Prompt 5 — storage and device expansion mega-phase** (PCI
+Previously: **Prompt 6 — USB and hardware compatibility mega-phase** (PCI
+capability parsing, MSI/MSI-X foundation, driver lifecycle + hardware event bus,
+a from-scratch xHCI controller, USB core + descriptor parser, USB HID
+keyboard/mouse, a unified PS/2+USB input stack, and expanded HW/USB/input
+userland). Boots to `MyOS Kernel 0.0.6`.
+
+Earlier: **Prompt 5 — storage and device expansion mega-phase** (PCI
 device manager, AHCI/NVMe block devices, block cache, a simple persistent
 filesystem, expanded VFS, PS/2 keyboard, real TTY input, an interactive shell,
 more coreutils, and a driver verification matrix).

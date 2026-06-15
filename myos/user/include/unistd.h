@@ -34,4 +34,12 @@ int mounts(struct sys_mount_entry *out, int max);
 int devices(struct sys_device_entry *out, int max);
 int blocks(struct sys_block_entry *out, int max);
 
+/* Prompt 6: hardware / USB / input introspection. */
+int usb_devices(struct sys_usb_entry *out, int max);
+int hw_info(struct sys_hw_info *out);
+int interrupts(struct sys_irq_entry *out, int max);
+int input_poll(struct sys_input_event *out);     /* 1 = event, 0 = none */
+int mouse_poll(struct sys_mouse_event *out);      /* 1 = event, 0 = none */
+int msi_info(struct sys_msi_entry *out, int max);
+
 #endif /* MYOS_USER_UNISTD_H */

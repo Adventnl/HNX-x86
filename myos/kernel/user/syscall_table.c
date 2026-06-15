@@ -26,6 +26,12 @@ static const syscall_fn g_table[SYS_MAX_NR] = {
     [SYS_MOUNT_INFO] = sys_mount_info,
     [SYS_DEVICES] = sys_devices,
     [SYS_BLOCKS]  = sys_blocks,
+    [SYS_USB_DEVICES] = sys_usb_devices,
+    [SYS_HW_INFO]     = sys_hw_info,
+    [SYS_INTERRUPTS]  = sys_interrupts,
+    [SYS_INPUT_POLL]  = sys_input_poll,
+    [SYS_MOUSE_POLL]  = sys_mouse_poll,
+    [SYS_MSI_INFO]    = sys_msi_info,
 };
 
 syscall_fn syscall_table_get(uint64_t nr) {

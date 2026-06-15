@@ -31,3 +31,7 @@ Markers: `[OK] PS/2 controller online`, `[OK] Keyboard input online`.
 
 See [tty.md](tty.md) for the canonical line discipline that consumes keyboard
 characters.
+
+## Prompt 6 — unified input (PS/2 + USB)
+
+Prompt 6 unifies PS/2 and USB-HID input under one event model (`kernel/input/input_event.h`): `INPUT_EVENT_KEY_DOWN/KEY_UP/TEXT/MOUSE_MOVE/MOUSE_BUTTON/MOUSE_WHEEL`, each tagged with an `input_source` (PS/2 keyboard, USB keyboard, USB mouse). The bridge `kernel/input/hid/hid_input.c` provides the sinks `input_emit_key/text/mouse_*`: key events go to the input queue, text goes to the TTY line discipline, pointer events go to the mouse queue (`kernel/input/mouse/`). The PS/2 path keeps working and now tags its events with `INPUT_SRC_PS2_KEYBOARD`; the USB HID boot keyboard/mouse feed the same sinks. Userland reads input via `SYS_INPUT_POLL` (keytest/inputtest) and mouse via `SYS_MOUSE_POLL` (mousetest). Markers: `[OK] Unified input stack online`, `[PASS] ps2 keyboard still works`, `[PASS] usb keyboard works`, `[PASS] usb mouse works`, `[PASS] tty accepts unified keyboard input`. See [hid.md](hid.md) and [hardware_compatibility.md](hardware_compatibility.md).

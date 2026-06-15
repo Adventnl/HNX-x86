@@ -419,8 +419,28 @@ Details in [prompt5.md](prompt5.md), [pci.md](pci.md), [block.md](block.md),
 AHCI read/write works under QEMU; HNXFS persists through the write-through cache
 to `storage.img`; NVMe is discovered + inspected with block I/O deferred.
 
-## Next milestone (after Prompt 5)
-**Prompt 6 — USB and hardware compatibility mega-phase:** xHCI controller, USB
-device enumeration, USB HID keyboard/mouse, improved input stack, PCI MSI/MSI-X
-foundation, driver power/reset handling, broader hardware compatibility, and
-expanded interactive userland.
+## Prompt 6 — USB and hardware compatibility (checkpoints 116–151)
+
+| # | Checkpoint | Status | Verified by |
+|---|------------|--------|-------------|
+| 116–118 | PCI capabilities + MSI + MSI-X foundation | done | `verify-msi` |
+| 119–121 | Driver lifecycle + reset/power + hardware event bus | done | `verify-driver-lifecycle` |
+| 122–133 | xHCI discovery → MMIO → caps → rings → contexts → reset/start → root hub | done | `verify-xhci` |
+| 134–139 | USB core + descriptor parser + transfers + addressing + config + hub | done | `verify-usb` |
+| 140–143 | USB HID core + report parser + boot keyboard + boot mouse | done | `verify-hid` |
+| 144–147 | Unified input model + keyboard/pointer paths + input userland APIs | done | `verify-input-unified` |
+| 148–149 | Hardware diagnostics + USB user tools | done | `verify-hw-userland` |
+| 150–151 | Verification matrix + documentation | done | `verify-prompt6` |
+
+xHCI is real bring-up against QEMU `qemu-xhci`: the No-Op command round-trips
+through the command + event rings, and `usb-kbd`/`usb-mouse` are enumerated over
+EP0 control transfers (descriptors read from the devices, QEMU vendor `0x0627`).
+HID binds both, switches them to boot protocol, and configures the interrupt
+endpoint. The unified input stack feeds both PS/2 and USB keyboard text to the
+TTY and queues mouse events for userland. Boots to `MyOS Kernel 0.0.6`. See
+[prompt6.md](prompt6.md) and the per-subsystem docs.
+
+## Next milestone (after Prompt 6)
+**Prompt 7 — networking mega-phase:** PCI NIC drivers, Ethernet, ARP, IPv4,
+ICMP ping, UDP, DHCP, DNS, a TCP foundation, a sockets API, network userland
+tools, and a network verification matrix.

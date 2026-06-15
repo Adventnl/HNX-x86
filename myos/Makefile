@@ -45,6 +45,10 @@ KERN_INCLUDES := -Ikernel/include -Ikernel/arch/x86_64 -Ikernel/memory \
                  -Ikernel/driver -Ikernel/pci -Ikernel/block -Ikernel/partition \
                  -Ikernel/storage -Ikernel/storage/ahci -Ikernel/storage/nvme \
                  -Ikernel/input -Ikernel/input/ps2 -Ikernel/input/keyboard \
+                 -Ikernel/input/mouse -Ikernel/input/hid \
+                 -Ikernel/msi -Ikernel/hw -Ikernel/hw/events -Ikernel/hw/power \
+                 -Ikernel/hw/diagnostics \
+                 -Ikernel/usb -Ikernel/usb/core -Ikernel/usb/xhci -Ikernel/usb/hid \
                  -Ishared/include
 # EXTRA_KCFLAGS is injected by the verify-* targets to enable destructive tests.
 EXTRA_KCFLAGS ?=
@@ -87,7 +91,13 @@ KERN_CSRC := $(wildcard kernel/src/*.c) $(wildcard kernel/arch/x86_64/*.c) \
              $(wildcard kernel/partition/*.c) $(wildcard kernel/storage/*.c) \
              $(wildcard kernel/storage/ahci/*.c) $(wildcard kernel/storage/nvme/*.c) \
              $(wildcard kernel/input/*.c) $(wildcard kernel/input/ps2/*.c) \
-             $(wildcard kernel/input/keyboard/*.c)
+             $(wildcard kernel/input/keyboard/*.c) \
+             $(wildcard kernel/input/mouse/*.c) $(wildcard kernel/input/hid/*.c) \
+             $(wildcard kernel/msi/*.c) \
+             $(wildcard kernel/hw/events/*.c) $(wildcard kernel/hw/power/*.c) \
+             $(wildcard kernel/hw/diagnostics/*.c) \
+             $(wildcard kernel/usb/core/*.c) $(wildcard kernel/usb/xhci/*.c) \
+             $(wildcard kernel/usb/hid/*.c)
 KERN_SSRC := $(wildcard kernel/arch/x86_64/*.S) $(wildcard kernel/sched/*.S) \
              $(wildcard kernel/user/*.S)
 KERN_OBJ  := $(addprefix $(B_KERN)/,$(notdir $(KERN_CSRC:.c=.o))) \
@@ -104,14 +114,23 @@ KERN_HDR  := $(wildcard kernel/include/*.h) $(wildcard kernel/arch/x86_64/*.h) \
              $(wildcard kernel/partition/*.h) $(wildcard kernel/storage/*.h) \
              $(wildcard kernel/storage/ahci/*.h) $(wildcard kernel/storage/nvme/*.h) \
              $(wildcard kernel/input/*.h) $(wildcard kernel/input/ps2/*.h) \
-             $(wildcard kernel/input/keyboard/*.h) shared/include/boot_info.h
+             $(wildcard kernel/input/keyboard/*.h) \
+             $(wildcard kernel/input/mouse/*.h) $(wildcard kernel/input/hid/*.h) \
+             $(wildcard kernel/msi/*.h) \
+             $(wildcard kernel/hw/events/*.h) $(wildcard kernel/hw/power/*.h) \
+             $(wildcard kernel/hw/diagnostics/*.h) \
+             $(wildcard kernel/usb/core/*.h) $(wildcard kernel/usb/xhci/*.h) \
+             $(wildcard kernel/usb/hid/*.h) \
+             shared/include/boot_info.h
 
 vpath %.c kernel/src kernel/arch/x86_64 kernel/memory kernel/sched kernel/tests \
           kernel/initramfs kernel/user kernel/fs kernel/fs/ramfs kernel/fs/devfs \
           kernel/fs/hnxfs kernel/device kernel/tty kernel/process kernel/driver \
           kernel/pci kernel/block kernel/partition kernel/storage \
           kernel/storage/ahci kernel/storage/nvme kernel/input kernel/input/ps2 \
-          kernel/input/keyboard
+          kernel/input/keyboard kernel/input/mouse kernel/input/hid \
+          kernel/msi kernel/hw/events kernel/hw/power kernel/hw/diagnostics \
+          kernel/usb/core kernel/usb/xhci kernel/usb/hid
 vpath %.S kernel/arch/x86_64 kernel/sched kernel/user
 
 # ---- User-space sources / objects ------------------------------------------
@@ -122,9 +141,12 @@ USER_CRT0    := $(B_USER)/crt0.o
 USER_BIN     := init shell echo cat ls pwd clear help true false yes whoami \
                 uptime meminfo ps testread hello \
                 mkdir rm touch writefile readfile hexdump stat mounts devices \
-                blocks lspci lsblk keyboard_test tty_test
+                blocks lspci lsblk keyboard_test tty_test \
+                hwinfo drivers devtree interrupts msiinfo powerinfo \
+                lsusb usbinfo hidinfo usbtest keytest mousetest inputtest
 USER_TEST    := syscall_test fd_test spawn_test vfs_test fault_test \
-                storage_test fs_test disk_test cache_test
+                storage_test fs_test disk_test cache_test \
+                usb_test hid_test input_test msi_test
 USER_PROGS   := $(addprefix $(B_USER)/,$(addsuffix .hxe,$(USER_BIN) $(USER_TEST)))
 USER_HDR     := $(wildcard user/include/*.h) kernel/user/syscall_numbers.h \
                 kernel/user/syscall_abi.h
@@ -152,7 +174,9 @@ endef
         verify-syscalls verify-vfs verify-process verify-shell \
         verify-user-fault verify-prompt4 \
         verify-pci verify-block verify-storage verify-hnxfs verify-keyboard \
-        verify-tty verify-expanded-userland verify-prompt5
+        verify-tty verify-expanded-userland verify-prompt5 \
+        verify-msi verify-driver-lifecycle verify-xhci verify-usb verify-hid \
+        verify-input-unified verify-hw-userland verify-prompt6
 .DEFAULT_GOAL := all
 
 all: bootloader kernel
@@ -204,6 +228,12 @@ $(B_USER)/%.o: user/coreutils/%.c $(USER_HDR) | dirs
 $(B_USER)/%.o: user/tests/%.c $(USER_HDR) | dirs
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 $(B_USER)/%.o: user/storage/%.c $(USER_HDR) | dirs
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+$(B_USER)/%.o: user/hw/%.c $(USER_HDR) | dirs
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+$(B_USER)/%.o: user/usb/%.c $(USER_HDR) | dirs
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+$(B_USER)/%.o: user/input/%.c $(USER_HDR) | dirs
 	$(CC) $(USER_CFLAGS) -c $< -o $@
 
 $(B_USER)/crt0.o: user/lib/crt0.S $(USER_HDR) | dirs
@@ -299,7 +329,7 @@ verify-boot: image
 	$(call need,$(PY),Install Python 3.)
 	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name boot --timeout 60 \
 	  --log $(B_IMG)/serial.log \
-	  --expect "MyOS Kernel 0.0.5" \
+	  --expect "MyOS Kernel 0.0.6" \
 	  --expect "[OK] Kernel entered" \
 	  --expect "[OK] GDT loaded" \
 	  --expect "[OK] TSS loaded" \
@@ -542,3 +572,84 @@ verify-qemu-matrix: image
 	    --expect "[OK] Early kernel tests passed" || exit 1; \
 	done
 	@echo "[OK] verify-qemu-matrix passed (128M 256M 512M 1024M 2048M)"
+
+# ---- Prompt 6 verification (USB + hardware compatibility) -------------------
+verify-msi: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name msi --timeout 90 \
+	  --log $(B_IMG)/msi.log \
+	  --expect "[OK] PCI capabilities parsed" \
+	  --expect "[OK] MSI foundation online" \
+	  --expect "[OK] MSI-X foundation online" \
+	  --expect "[PASS] msi capability tests"
+
+verify-driver-lifecycle: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name driver-lifecycle --timeout 90 \
+	  --log $(B_IMG)/driver-lifecycle.log \
+	  --expect "[OK] Driver lifecycle online" \
+	  --expect "[OK] Hardware event bus online" \
+	  --expect "[PASS] driver lifecycle tests"
+
+verify-xhci: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name xhci --timeout 90 \
+	  --log $(B_IMG)/xhci.log \
+	  --expect "[OK] xHCI controller found" \
+	  --expect "[OK] xHCI MMIO mapped" \
+	  --expect "[OK] xHCI command ring online" \
+	  --expect "[OK] xHCI event ring online" \
+	  --expect "[OK] xHCI controller started" \
+	  --expect "[OK] xHCI root hub scanned"
+
+verify-usb: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name usb --timeout 90 \
+	  --log $(B_IMG)/usb.log \
+	  --expect "[OK] USB core online" \
+	  --expect "[PASS] USB descriptor parser" \
+	  --expect "[OK] USB hub foundation online" \
+	  --expect "[PASS] usb enumeration"
+
+verify-hid: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name hid --timeout 90 \
+	  --log $(B_IMG)/hid.log \
+	  --expect "[OK] USB HID core online" \
+	  --expect "[OK] USB keyboard online" \
+	  --expect "[OK] USB mouse online" \
+	  --expect "[PASS] hid keyboard test" \
+	  --expect "[PASS] hid mouse test"
+
+verify-input-unified: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name input-unified --timeout 90 \
+	  --log $(B_IMG)/input-unified.log \
+	  --expect "[OK] Unified input stack online" \
+	  --expect "[PASS] ps2 keyboard still works" \
+	  --expect "[PASS] usb keyboard works" \
+	  --expect "[PASS] usb mouse works" \
+	  --expect "[PASS] tty accepts unified keyboard input"
+
+verify-hw-userland: image
+	$(call need,$(PY),Install Python 3.)
+	$(PY) tools/verify_qemu.py --image $(IMAGE) --test-name hw-userland --timeout 90 \
+	  --log $(B_IMG)/hw-userland.log \
+	  --expect "[PASS] hwinfo" \
+	  --expect "[PASS] drivers" \
+	  --expect "[PASS] devtree" \
+	  --expect "[PASS] lsusb" \
+	  --expect "[PASS] hidinfo" \
+	  --expect "[PASS] inputtest"
+
+verify-prompt6:
+	$(MAKE) verify-prompt5
+	$(MAKE) verify-msi
+	$(MAKE) verify-driver-lifecycle
+	$(MAKE) verify-xhci
+	$(MAKE) verify-usb
+	$(MAKE) verify-hid
+	$(MAKE) verify-input-unified
+	$(MAKE) verify-hw-userland
+	$(MAKE) verify-qemu-matrix
+	@echo "[OK] verify-prompt6 passed"

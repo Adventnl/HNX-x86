@@ -15,7 +15,20 @@
 #include "path.h"
 #include "inode.h"
 #include "driver_registry.h"
+#include "driver.h"
 #include "block_registry.h"
+#include "usb.h"
+#include "hid.h"
+#include "hw_diag.h"
+#include "irq.h"
+#include "input_queue.h"
+#include "input_event.h"
+#include "mouse_event.h"
+#include "pci.h"
+#include "pci_device.h"
+#include "msi.h"
+#include "msix.h"
+#include "pci_caps.h"
 #include "idt.h"
 #include "gdt.h"
 #include "scheduler.h"
@@ -350,6 +363,9 @@ int64_t sys_devices(struct syscall_frame *f) {
         memset(&e, 0, sizeof(e));
         strlcpy(e.name, d->name, sizeof(e.name));
         e.type = (uint32_t)d->type;
+        e.state = (uint32_t)d->state;
+        e.power_state = (uint32_t)d->power_state;
+        strlcpy(e.driver, d->driver ? d->driver->name : "", sizeof(e.driver));
         if (user_copy_to_user(f->rdi + (uint64_t)i * sizeof(e), &e, sizeof(e)) < 0) {
             return -SYS_EFAULT;
         }
@@ -376,6 +392,150 @@ int64_t sys_blocks(struct syscall_frame *f) {
         strlcpy(e.name, b->name, sizeof(e.name));
         e.sectors = b->sector_count;
         e.sector_size = b->sector_size;
+        if (user_copy_to_user(f->rdi + (uint64_t)i * sizeof(e), &e, sizeof(e)) < 0) {
+            return -SYS_EFAULT;
+        }
+    }
+    return max;
+}
+
+/* ---- Prompt 6: hardware / USB / input introspection --------------------- */
+
+int64_t sys_usb_devices(struct syscall_frame *f) {
+    int max = (int)f->rsi;
+    if (max <= 0) {
+        return 0;
+    }
+    int total = usb_device_count();
+    if (max > total) {
+        max = total;
+    }
+    for (int i = 0; i < max; i++) {
+        struct usb_device *d = usb_device_at(i);
+        if (!d) {
+            break;
+        }
+        struct sys_usb_entry e;
+        memset(&e, 0, sizeof(e));
+        e.name[0] = 'u'; e.name[1] = 's'; e.name[2] = 'b';
+        e.name[3] = (char)('0' + (d->hc_slot % 10)); e.name[4] = 0;
+        e.vendor = d->vendor_id;
+        e.product = d->product_id;
+        e.dev_class = d->config.interface.iface_class;
+        e.dev_subclass = d->config.interface.iface_subclass;
+        e.dev_protocol = d->config.interface.iface_protocol;
+        e.speed = d->speed;
+        e.slot = d->hc_slot;
+        if (d->config.interface.iface_class == 0x03) {
+            e.hid_type = (d->config.interface.iface_protocol == 2) ? 2 : 1;
+        }
+        if (user_copy_to_user(f->rdi + (uint64_t)i * sizeof(e), &e, sizeof(e)) < 0) {
+            return -SYS_EFAULT;
+        }
+    }
+    return max;
+}
+
+int64_t sys_hw_info(struct syscall_frame *f) {
+    struct hw_diag_summary s;
+    hw_diag_collect(&s);
+    struct sys_hw_info out;
+    memset(&out, 0, sizeof(out));
+    out.pci_functions = s.pci_functions;
+    out.devices = s.devices;
+    out.block_devices = s.block_devices;
+    out.usb_devices = s.usb_devices;
+    out.irq_vectors = s.irq_active_vectors;
+    out.irq_total = s.irq_total;
+    out.hw_events = s.hw_events;
+    if (user_copy_to_user(f->rdi, &out, sizeof(out)) < 0) {
+        return -SYS_EFAULT;
+    }
+    return 0;
+}
+
+int64_t sys_interrupts(struct syscall_frame *f) {
+    int max = (int)f->rsi;
+    if (max <= 0) {
+        return 0;
+    }
+    int n = 0;
+    for (uint16_t v = 0x20; v <= 0x4F && n < max; v++) {
+        uint64_t c = irq_count_for_vector((uint8_t)v);
+        if (!c) {
+            continue;
+        }
+        struct sys_irq_entry e;
+        memset(&e, 0, sizeof(e));
+        e.vector = v;
+        e.count = c;
+        if (user_copy_to_user(f->rdi + (uint64_t)n * sizeof(e), &e, sizeof(e)) < 0) {
+            return -SYS_EFAULT;
+        }
+        n++;
+    }
+    return n;
+}
+
+int64_t sys_input_poll(struct syscall_frame *f) {
+    struct input_event ev;
+    if (input_queue_pop(&ev) != 0) {
+        return 0;                       /* none pending */
+    }
+    struct sys_input_event out;
+    memset(&out, 0, sizeof(out));
+    out.type = ev.type;
+    out.code = ev.code;
+    out.value = ev.value;
+    out.value2 = ev.value2;
+    out.source = ev.source;
+    if (user_copy_to_user(f->rdi, &out, sizeof(out)) < 0) {
+        return -SYS_EFAULT;
+    }
+    return 1;
+}
+
+int64_t sys_mouse_poll(struct syscall_frame *f) {
+    struct mouse_event me;
+    if (mouse_event_pop(&me) != 0) {
+        return 0;
+    }
+    struct sys_mouse_event out;
+    memset(&out, 0, sizeof(out));
+    out.dx = me.dx;
+    out.dy = me.dy;
+    out.wheel = me.wheel;
+    out.buttons = me.buttons;
+    out.source = me.source;
+    if (user_copy_to_user(f->rdi, &out, sizeof(out)) < 0) {
+        return -SYS_EFAULT;
+    }
+    return 1;
+}
+
+int64_t sys_msi_info(struct syscall_frame *f) {
+    int max = (int)f->rsi;
+    if (max <= 0) {
+        return 0;
+    }
+    int total = pci_device_count();
+    if (max > total) {
+        max = total;
+    }
+    for (int i = 0; i < max; i++) {
+        struct pci_device *d = (struct pci_device *)pci_device_at(i);
+        if (!d) {
+            break;
+        }
+        struct sys_msi_entry e;
+        memset(&e, 0, sizeof(e));
+        e.name[0] = 'p'; e.name[1] = 'c'; e.name[2] = 'i';
+        e.name[3] = (char)('0' + (d->slot % 10)); e.name[4] = 0;
+        e.msi = (uint8_t)msi_supported(d);
+        e.msix = (uint8_t)msix_supported(d);
+        e.msix_count = e.msix ? (uint16_t)msix_table_size(d) : 0;
+        e.vendor = d->vendor;
+        e.device = d->device;
         if (user_copy_to_user(f->rdi + (uint64_t)i * sizeof(e), &e, sizeof(e)) < 0) {
             return -SYS_EFAULT;
         }

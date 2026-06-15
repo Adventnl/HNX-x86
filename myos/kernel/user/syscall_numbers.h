@@ -31,8 +31,15 @@
 #define SYS_MOUNT_INFO 20
 #define SYS_DEVICES  21
 #define SYS_BLOCKS   22
+/* Prompt 6: hardware / USB / input introspection. */
+#define SYS_USB_DEVICES 23
+#define SYS_HW_INFO     24
+#define SYS_INTERRUPTS  25
+#define SYS_INPUT_POLL  26
+#define SYS_MOUSE_POLL  27
+#define SYS_MSI_INFO    28
 
-#define SYS_MAX_NR   23        /* one past the highest valid number */
+#define SYS_MAX_NR   29        /* one past the highest valid number */
 
 /* lseek whence. */
 #define SEEK_SET 0

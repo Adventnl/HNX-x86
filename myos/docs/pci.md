@@ -25,3 +25,7 @@ can enumerate them.
 
 Markers: `[OK] PCI bus scanned`, `[PASS] pci enumeration`.
 Tool: `tools/pci/pci_ids_min.py` (class/vendor name lookup).
+
+## Prompt 6 — capabilities + MSI/MSI-X
+
+`kernel/msi/pci_caps.c` adds capability-list parsing: `pci_find_capability(dev, id)` walks the Status-bit-4 capability list (pointer at 0x34, linked `next` bytes) to find MSI (0x05), MSI-X (0x11), PCIe (0x10), Power-Management (0x01). PCIe extended capabilities (offset >= 0x100) need ECAM and are reported honestly as unavailable. `kernel/msi/msi.c` + `msix.c` add the MSI/MSI-X foundation (message address/data programming, MSI-X table MMIO mapping). The xHCI controller is discovered here by class 0x0C / subclass 0x03 / prog-if 0x30. Markers: `[OK] PCI capabilities parsed`, `[OK] MSI foundation online`, `[OK] MSI-X foundation online`, `[PASS] msi capability tests`. See [msi.md](msi.md).
